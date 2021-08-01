@@ -1,9 +1,9 @@
 ---
 
 # Docker Engine options
-docker_repo_url: "https://download.docker.com/linux/ubuntu"
+docker_repo_url: "https://download.docker.com/linux/debian"
 docker_gpg_url: "{{ docker_repo_url }}/gpg"
-docker_gpg_keyring: "/usr/share/keyrings/docker-archive-keyring.gpg"
+docker_gpg_keyring: /usr/share/keyrings/docker-archive-keyring.gpg
 docker_arch: arm64
 docker_release_channel: stable
 docker_repository: "deb [arch={{ docker_arch }} signed-by={{ docker_gpg_keyring }}] {{ docker_repo_url }} {{ ansible_distribution_release }} {{ docker_release_channel }}"
