@@ -1,0 +1,8 @@
+---
+
+- name: Perform initial setup
+  include_tasks: install-dependencies.yaml
+
+- name: Setup Docker
+  include_tasks: setup-docker.yaml
+
