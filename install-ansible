@@ -1,0 +1,7 @@
+#!/bin/bash
+
+## NEED TO LAUNCH WITH SUDO
+apt-get update
+apt-get install --yes software-properties-common
+add-apt-repository --yes --update ppa:ansible/ansible
+apt-get install --yes ansible
