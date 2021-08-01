@@ -1,2 +1,5 @@
 [raspberries]
 localhost
+
+[raspberries:vars]
+ansible_connection=local
