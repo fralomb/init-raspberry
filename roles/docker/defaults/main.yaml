@@ -1,5 +1,4 @@
 ---
-
 # Docker Engine options
 docker_repo_url: "https://download.docker.com/linux/raspbian"
 docker_gpg_url: "{{ docker_repo_url }}/gpg"
