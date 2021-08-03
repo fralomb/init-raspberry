@@ -16,6 +16,7 @@
       - ca-certificates
       - gnupg
       - software-properties-common
+      - python3-pip
 
 - name: Add Docker offical GPG key
   apt_key:
