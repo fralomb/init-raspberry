@@ -15,16 +15,15 @@
       - apt-transport-https
       - ca-certificates
       - gnupg
+      - software-properties-common
 
 - name: Add Docker offical GPG key
-  become: yes
   apt_key:
     url: "{{ docker_gpg_url }}" 
     state: present
     keyring: "{{ docker_gpg_keyring }}"
 
 - name: Add Docker reporitory
-  become: yes
   apt_repository:
     repo: "{{ docker_repository }}"
     state: present
