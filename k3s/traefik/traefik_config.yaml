@@ -1,0 +1,50 @@
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    # Create an IngressRoute for the dashboard
+    ingressRoute:
+      dashboard:
+        enabled: true
+    additionalArguments:
+      - "--api.insecure=true"
+      - "--log.level=DEBUG"
+    extraObjects:
+      - apiVersion: v1
+        kind: Service
+        metadata:
+          name: traefik-api
+        spec:
+          type: ClusterIP
+          selector:
+            app.kubernetes.io/name: traefik
+          ports:
+          - port: 80
+            name: traefik
+            targetPort: 9000
+            protocol: TCP
+      - apiVersion: networking.k8s.io/v1
+        kind: Ingress
+        metadata:
+          name: traefik-dashboard
+          annotations:
+            traefik.ingress.kubernetes.io/router.entrypoints: web
+        spec:
+          rules:
+          - http:
+              paths:
+              - path: /
+                pathType: Prefix
+                backend:
+                  service:
+                    name: traefik-api
+                    port:
+                      name: traefik
+
+    providers:
+      kubernetesCRD:
+        allowCrossNamespace: true
