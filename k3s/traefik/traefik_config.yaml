@@ -6,6 +6,16 @@ metadata:
   namespace: kube-system
 spec:
   valuesContent: |-
+    logs:
+      general:
+        level: DEBUG
+      access:
+        enabled: true
+        filters:
+          statuscodes: "200,300-302"
+          retryattempts: true
+          minduration: 10ms
+
     ports:
       web:
         redirectTo:
@@ -19,6 +29,16 @@ spec:
         # Custom match rule with host domain
         matchRule: PathPrefix(`/api`, `/dashboard`)
         entryPoints: ["traefik"]
+    extraObjects:
+    - apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: redirect-non-www-to-www
+      spec:
+        redirectRegex:
+          permanent: true
+          regex: "^(https?)://(?:www\\.)?(.+)$"
+          replacement: "${1}://www.${2}"
     providers:
       kubernetesCRD:
         enabled: true
