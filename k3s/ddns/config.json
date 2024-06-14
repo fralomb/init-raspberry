@@ -1,0 +1,32 @@
+{
+  "cloudflare": [
+    {
+      "authentication": {
+        "api_token": "$CF_API_TOKEN"
+      },
+      "zone_id": "$CF_ZONE_ID_1",
+      "subdomains": [
+        {
+          "name": "",
+          "proxied": true
+        }
+      ]
+    },
+    {
+      "authentication": {
+        "api_token": "$CF_API_TOKEN"
+      },
+      "zone_id": "$CF_ZONE_ID_2",
+      "subdomains": [
+        {
+          "name": "",
+          "proxied": true
+        }
+      ]
+    }
+  ],
+  "a": true,
+  "aaaa": false,
+  "purgeUnknownRecords": false,
+  "ttl": 300
+}

@@ -1,4 +1,54 @@
 ---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: cloudflare-letsencrypt
+  namespace: kube-system
+spec:
+  acme:
+    # server: https://acme-v02.api.letsencrypt.org/directory # prod env
+    server: https://acme-staging-v02.api.letsencrypt.org/directory # staging env
+    email: fra.lombardo92@gmail.com
+    # Name of a secret used to store the ACME account private key
+    privateKeySecretRef:
+      name: cloudflare-letsencrypt-key
+    solvers:
+      - selector: {}
+        dns01:
+          cloudflare:
+            email: fra.lombardo92@gmail.com
+            apiTokenSecretRef:
+              name: cloudflare
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: francesco-lombardo-it-cert
+  namespace: kube-system
+spec:
+  secretName: francesco-lombardo-it-tls
+  dnsNames:
+    - "francesco-lombardo.it"
+    - "*.francesco-lombardo.it"
+  issuerRef:
+    name: cloudflare-letsencrypt
+    kind: Issuer
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: daniel-e-luana-sposi-it-cert
+  namespace: kube-system
+spec:
+  secretName: daniel-e-luana-sposi-it-tls
+  dnsNames:
+    - "daniel-e-luana-sposi.it"
+    - "*.daniel-e-luana-sposi.it"
+  issuerRef:
+    name: cloudflare-letsencrypt
+    kind: Issuer
+---
 apiVersion: helm.cattle.io/v1
 kind: HelmChartConfig
 metadata:
@@ -6,6 +56,13 @@ metadata:
   namespace: kube-system
 spec:
   valuesContent: |-
+    tlsStore:
+      default:
+        certificates:
+        - secretName: francesco-lombardo-it-tls
+        - secretName: daniel-e-luana-sposi-it-tls
+        defaultCertificate:
+          secretName: francesco-lombardo-it-tls
     logs:
       general:
         level: DEBUG
@@ -43,4 +100,3 @@ spec:
       kubernetesCRD:
         enabled: true
         allowCrossNamespace: true
-

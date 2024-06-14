@@ -33,3 +33,37 @@ Installation requirements for Raspberry Pi OS: `https://docs.k3s.io/advanced#ras
 - Error `restorecon: command not found` --> `sudo apt-get install policycoreutils`
 ### Access K3s cluster from outside
 The kubeconfig file stored at `/etc/rancher/k3s/k3s.yaml` is used to configure access to the Kubernetes cluster.
+
+## K3s dependencies
+### Argocd
+TODO
+
+### Traefik
+TODO
+
+### Cert-Manager
+[How to configure](https://github.com/traefik/traefik-helm-chart/blob/master/EXAMPLES.md#provide-default-certificate-with-cert-manager-and-cloudflare-dns) Traefik with Cert-Manger for signed certificates.
+
+Install `Cert-Manager` via [Helm chart](https://cert-manager.io/docs/installation/helm/).
+
+
+Create a secret containing the API token of Cloudflare in the `traefik` namespace:
+```
+kubectl create secret generic cloudflare --from-literal=api-token=XXX --type=Opaque --namespace traefik
+```
+
+### Cloudflare DDNS
+Allows to dynamically change the IP address of the domains defined in Cloudflare using an API Token.
+Based on this [repo](https://github.com/timothymiller/cloudflare-ddns).
+
+At the moment, it is using a secret injected in the deployment, but it needs to be re-thinked using some kind of Secrets management tool.
+
+In order to generate the configuration use `envsubst` to substitute the cloudflare secrets:
+```
+CF_API_TOKEN="XXX" CF_ZONE_ID_1="YYY" CF_ZONE_ID_2="ZZZ" envsubst < k3s/ddns/config.json > config.json
+```
+Then, create the secret using the file:
+```
+kubectl create secret generic config-cloudflare-ddns --from-file=config.json -n ddns
+```
+
