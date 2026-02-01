@@ -1,2 +1,39 @@
 ---
+# Global variables for all hosts
+
 ansible_python_interpreter: /usr/bin/python3
+
+# K3s configuration
+k3s_version: "v1.29.0+k3s1"
+k3s_install_script_url: "https://get.k3s.io"
+
+# K3s master configuration
+# Disable traefik (we'll use Gateway API instead) and servicelb
+k3s_master_extra_args: >-
+  --disable traefik
+  --disable servicelb
+  --write-kubeconfig-mode 644
+
+# K3s worker configuration
+k3s_worker_extra_args: ""
+
+# System packages to install
+system_packages:
+  - curl
+  - wget
+  - git
+  - vim
+  - htop
+  - iptables
+  - open-iscsi
+  - nfs-common
+  - wireguard
+
+# Raspberry Pi specific packages for k3s networking
+rpi_k3s_packages:
+  - linux-modules-extra-raspi
+  - policycoreutils
+
+# Helm configuration
+helm_version: "v3.14.0"
+helm_install_script_url: "https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3"

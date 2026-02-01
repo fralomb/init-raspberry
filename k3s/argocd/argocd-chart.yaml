@@ -1,4 +1,8 @@
 ---
+# ArgoCD Helm Chart
+# GitOps continuous delivery tool for Kubernetes
+# Docs: https://argo-cd.readthedocs.io/
+
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -11,45 +15,67 @@ spec:
   createNamespace: true
   version: 6.7.18
   valuesContent: |-
+    # Global settings
     global:
-      domain: argocd.internal.francesco-lombardo.it
+      domain: argocd.example.com  # TODO: Update with your domain
       logging:
         format: json
         level: info
+
+    # Server configuration
     configs:
       params:
+        # Run in insecure mode (TLS termination at Gateway)
         server.insecure: true
-      # credentialTemplates:
-      #   github-app-creds:
-      #     url: https://github.com/argoproj
-      #     githubAppID: 1
-      #     githubAppInstallationID: 2
-      #     githubAppEnterpriseBaseUrl: https://ghe.example.com/api/v3
-      #     githubAppPrivateKey: |
-      #       -----BEGIN OPENSSH PRIVATE KEY-----
-      #       ...
-      #       -----END OPENSSH PRIVATE KEY-----
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: argo-ingress
-  namespace: gitops
-spec:
-  entryPoints:
-    - websecure
-  routes:
-  - match: Host(`argocd.internal.francesco-lombardo.it`)
-    kind: Rule
-    services:
-    - name: argocd-server
-      port: 80
-  - kind: Rule
-    match: Host(`argocd.internal.francesco-lombardo.it`) && Headers(`Content-Type`, `application/grpc`)
-    priority: 11
-    services:
-    - name: argocd-server
-      port: 80
-      scheme: h2c
-  tls:
-    secretName: argocd-certificate
+
+    # Resource limits for Raspberry Pi
+    controller:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+
+    server:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+    repoServer:
+      resources:
+        requests:
+          cpu: 50m
+          memory: 128Mi
+        limits:
+          cpu: 200m
+          memory: 256Mi
+
+    redis:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+
+    dex:
+      enabled: false  # Disable Dex for simpler setup
+
+    applicationSet:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+
+    notifications:
+      enabled: false  # Disable notifications for simpler setup

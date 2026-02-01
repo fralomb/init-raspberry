@@ -1,0 +1,75 @@
+---
+# Install system requirements for K3s
+
+- name: Install common system packages
+  ansible.builtin.apt:
+    name: "{{ system_packages }}"
+    state: present
+    update_cache: yes
+  become: yes
+  retries: 3
+  delay: 10
+
+- name: Install Raspberry Pi specific packages
+  ansible.builtin.apt:
+    name: "{{ rpi_k3s_packages }}"
+    state: present
+  become: yes
+  retries: 3
+  delay: 10
+  when: is_raspberry_pi | default(false)
+  ignore_errors: yes  # Some packages may not be available on all distros
+
+- name: Ensure iptables uses legacy mode (required for K3s)
+  ansible.builtin.alternatives:
+    name: iptables
+    path: /usr/sbin/iptables-legacy
+  become: yes
+  ignore_errors: yes
+
+- name: Ensure ip6tables uses legacy mode (required for K3s)
+  ansible.builtin.alternatives:
+    name: ip6tables
+    path: /usr/sbin/ip6tables-legacy
+  become: yes
+  ignore_errors: yes
+
+- name: Enable and start iscsid service (for storage)
+  ansible.builtin.systemd:
+    name: iscsid
+    state: started
+    enabled: yes
+  become: yes
+  ignore_errors: yes
+
+- name: Load required kernel modules
+  ansible.builtin.modprobe:
+    name: "{{ item }}"
+    state: present
+  become: yes
+  loop:
+    - br_netfilter
+    - overlay
+  ignore_errors: yes
+
+- name: Ensure kernel modules load on boot
+  ansible.builtin.copy:
+    dest: /etc/modules-load.d/k3s.conf
+    content: |
+      br_netfilter
+      overlay
+    mode: '0644'
+  become: yes
+
+- name: Configure sysctl for K3s networking
+  ansible.builtin.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/99-k3s.conf
+    reload: yes
+  become: yes
+  loop:
+    - { key: 'net.bridge.bridge-nf-call-iptables', value: '1' }
+    - { key: 'net.bridge.bridge-nf-call-ip6tables', value: '1' }
+    - { key: 'net.ipv4.ip_forward', value: '1' }
+    - { key: 'net.ipv6.conf.all.forwarding', value: '1' }

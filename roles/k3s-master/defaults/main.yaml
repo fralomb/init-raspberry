@@ -1,0 +1,17 @@
+---
+# Default variables for k3s-master role
+
+# K3s version to install
+k3s_version: "v1.29.0+k3s1"
+
+# K3s installation script URL
+k3s_install_script_url: "https://get.k3s.io"
+
+# Extra arguments for K3s server
+# --disable traefik: We'll use Gateway API instead
+# --disable servicelb: We'll use a different load balancer solution
+# --write-kubeconfig-mode 644: Make kubeconfig readable
+k3s_master_extra_args: >-
+  --disable traefik
+  --disable servicelb
+  --write-kubeconfig-mode 644

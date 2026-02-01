@@ -1,5 +1,38 @@
-[raspberries]
-localhost
+# Raspberry Pi K3s Cluster Inventory
+#
+# Usage:
+# - Add your Raspberry Pi hosts under the appropriate group
+# - Only ONE host should be in [k3s_master] - this will be the control plane
+# - All other nodes should be in [k3s_workers]
+# - The [k3s_cluster:children] group combines both for common operations
+#
+# Example configuration:
+#
+# [k3s_master]
+# raspberry-master ansible_host=192.168.1.100
+#
+# [k3s_workers]
+# raspberry-worker-1 ansible_host=192.168.1.101
+# raspberry-worker-2 ansible_host=192.168.1.102
+# raspberry-worker-3 ansible_host=192.168.1.103
 
-[raspberries:vars]
-ansible_connection=local
+[k3s_master]
+# Add your master node here (only one)
+# raspberry-master ansible_host=192.168.1.100
+
+[k3s_workers]
+# Add your worker nodes here (zero or more)
+# raspberry-worker-1 ansible_host=192.168.1.101
+# raspberry-worker-2 ansible_host=192.168.1.102
+
+[k3s_cluster:children]
+k3s_master
+k3s_workers
+
+[k3s_cluster:vars]
+ansible_user=pi
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+ansible_python_interpreter=/usr/bin/python3
+
+# For local testing only (comment out for remote execution)
+# ansible_connection=local

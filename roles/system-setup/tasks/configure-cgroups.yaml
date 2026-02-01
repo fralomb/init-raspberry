@@ -1,0 +1,47 @@
+---
+# Configure cgroups for K3s on Raspberry Pi
+
+- name: Check if running on Raspberry Pi
+  ansible.builtin.command: cat /proc/device-tree/model
+  register: device_model
+  changed_when: false
+  failed_when: false
+
+- name: Set is_raspberry_pi fact
+  ansible.builtin.set_fact:
+    is_raspberry_pi: "{{ 'Raspberry Pi' in device_model.stdout | default('') }}"
+
+- name: Check current cmdline.txt content
+  ansible.builtin.slurp:
+    src: "{{ cmdline_path }}"
+  register: cmdline_content
+  become: yes
+  when: is_raspberry_pi
+
+- name: Decode cmdline content
+  ansible.builtin.set_fact:
+    current_cmdline: "{{ cmdline_content.content | b64decode | trim }}"
+  when: is_raspberry_pi and cmdline_content is succeeded
+
+- name: Check if cgroups are already enabled
+  ansible.builtin.set_fact:
+    cgroups_enabled: "{{ 'cgroup_memory=1' in current_cmdline and 'cgroup_enable=memory' in current_cmdline }}"
+  when: is_raspberry_pi
+
+- name: Enable cgroups in cmdline.txt
+  ansible.builtin.lineinfile:
+    path: "{{ cmdline_path }}"
+    regexp: '^(.*)$'
+    line: '\1 cgroup_memory=1 cgroup_enable=memory'
+    backrefs: yes
+  become: yes
+  register: cgroups_changed
+  when:
+    - is_raspberry_pi
+    - not cgroups_enabled
+  notify: reboot required
+
+- name: Display cgroups status
+  ansible.builtin.debug:
+    msg: "cgroups are already enabled"
+  when: is_raspberry_pi and cgroups_enabled | default(false)

@@ -1,7 +1,90 @@
 ---
+# Main Ansible Playbook for Raspberry Pi K3s Cluster Setup
+#
+# Usage:
+#   Full setup (all nodes):
+#     ansible-playbook -i inventory/hosts playbook.yaml
+#
+#   System setup only:
+#     ansible-playbook -i inventory/hosts playbook.yaml --tags system-setup
+#
+#   K3s installation only:
+#     ansible-playbook -i inventory/hosts playbook.yaml --tags k3s
+#
+#   Master node only:
+#     ansible-playbook -i inventory/hosts playbook.yaml --limit k3s_master
+#
+#   Worker nodes only (after master is set up):
+#     ansible-playbook -i inventory/hosts playbook.yaml --limit k3s_workers
 
-- name: Setup Raspberry
-  hosts: all
+# Play 1: System preparation for all nodes
+- name: Prepare Raspberry Pi systems for K3s
+  hosts: k3s_cluster
+  become: yes
+  gather_facts: yes
+  tags:
+    - system-setup
+    - always
   roles:
-    - role: docker
+    - role: system-setup
 
+# Play 2: Install K3s on master node
+- name: Install K3s master node
+  hosts: k3s_master
+  become: yes
+  gather_facts: yes
+  tags:
+    - k3s
+    - k3s-master
+  roles:
+    - role: k3s-master
+
+# Play 3: Install K3s on worker nodes
+- name: Install K3s worker nodes
+  hosts: k3s_workers
+  become: yes
+  gather_facts: yes
+  serial: 1  # Install workers one at a time to avoid race conditions
+  tags:
+    - k3s
+    - k3s-workers
+  roles:
+    - role: k3s-worker
+
+# Play 4: Display cluster status
+- name: Display K3s cluster status
+  hosts: k3s_master
+  become: yes
+  gather_facts: no
+  tags:
+    - k3s
+    - status
+  tasks:
+    - name: Wait for all nodes to be ready
+      ansible.builtin.command: kubectl get nodes --no-headers
+      register: nodes_status
+      until: nodes_status.stdout_lines | length == (groups['k3s_cluster'] | length)
+      retries: 30
+      delay: 10
+      changed_when: false
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Display cluster nodes
+      ansible.builtin.command: kubectl get nodes -o wide
+      register: cluster_nodes
+      changed_when: false
+      environment:
+        KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+    - name: Show cluster status
+      ansible.builtin.debug:
+        msg: |
+          K3s Cluster Status:
+          {{ cluster_nodes.stdout }}
+
+          Next steps:
+          1. Copy kubeconfig from master: /etc/rancher/k3s/k3s.yaml
+          2. Apply Gateway API: kubectl apply -f k3s/gateway-api/
+          3. Apply Cert-Manager: kubectl apply -f k3s/cert-manager/
+          4. Apply ArgoCD: kubectl apply -f k3s/argocd/

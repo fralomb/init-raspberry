@@ -1,0 +1,29 @@
+---
+# Update and upgrade system packages
+
+- name: Update apt cache
+  ansible.builtin.apt:
+    update_cache: yes
+    cache_valid_time: 3600
+  become: yes
+
+- name: Upgrade all packages to the latest version
+  ansible.builtin.apt:
+    upgrade: dist
+    autoremove: yes
+    autoclean: yes
+  become: yes
+  register: apt_upgrade
+  retries: 3
+  delay: 10
+  until: apt_upgrade is succeeded
+
+- name: Check if reboot is required
+  ansible.builtin.stat:
+    path: /var/run/reboot-required
+  register: reboot_required
+
+- name: Display reboot required message
+  ansible.builtin.debug:
+    msg: "Reboot is required after package upgrades"
+  when: reboot_required.stat.exists

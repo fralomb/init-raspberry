@@ -1,0 +1,113 @@
+---
+# Main task file for k3s-master role
+# Installs and configures K3s master (control plane) node
+
+- name: Check if K3s is already installed
+  ansible.builtin.stat:
+    path: /usr/local/bin/k3s
+  register: k3s_binary
+
+- name: Check if K3s service is running
+  ansible.builtin.systemd:
+    name: k3s
+  register: k3s_service
+  failed_when: false
+
+- name: Download K3s installation script
+  ansible.builtin.get_url:
+    url: "{{ k3s_install_script_url }}"
+    dest: /tmp/k3s-install.sh
+    mode: '0755'
+  when: not k3s_binary.stat.exists
+
+- name: Install K3s master node
+  ansible.builtin.command: /tmp/k3s-install.sh
+  environment:
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    INSTALL_K3S_EXEC: "server {{ k3s_master_extra_args }}"
+  become: yes
+  when: not k3s_binary.stat.exists
+  register: k3s_install
+
+- name: Wait for K3s to be ready
+  ansible.builtin.wait_for:
+    path: /etc/rancher/k3s/k3s.yaml
+    state: present
+    timeout: 120
+  become: yes
+
+- name: Wait for K3s node to be ready
+  ansible.builtin.command: kubectl get nodes --no-headers
+  register: kubectl_nodes
+  until: "'Ready' in kubectl_nodes.stdout"
+  retries: 30
+  delay: 10
+  changed_when: false
+  become: yes
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Clean up installation script
+  ansible.builtin.file:
+    path: /tmp/k3s-install.sh
+    state: absent
+
+- name: Get K3s node token
+  ansible.builtin.slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_token_raw
+  become: yes
+
+- name: Set K3s token fact
+  ansible.builtin.set_fact:
+    k3s_token: "{{ k3s_token_raw.content | b64decode | trim }}"
+
+- name: Get master node IP
+  ansible.builtin.set_fact:
+    k3s_master_ip: "{{ ansible_default_ipv4.address | default(ansible_host) }}"
+
+- name: Display K3s master information
+  ansible.builtin.debug:
+    msg: |
+      K3s master node installed successfully!
+      Master IP: {{ k3s_master_ip }}
+      Node Token: {{ k3s_token }}
+
+      To add worker nodes, use:
+        K3S_URL=https://{{ k3s_master_ip }}:6443 K3S_TOKEN={{ k3s_token }} ./k3s-install.sh
+
+- name: Save kubeconfig to user home directory
+  ansible.builtin.copy:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ ansible_env.HOME }}/.kube/config"
+    remote_src: yes
+    owner: "{{ ansible_user }}"
+    mode: '0600'
+  become: yes
+
+- name: Create .kube directory if it doesn't exist
+  ansible.builtin.file:
+    path: "{{ ansible_env.HOME }}/.kube"
+    state: directory
+    owner: "{{ ansible_user }}"
+    mode: '0755'
+  become: yes
+
+- name: Update kubeconfig server address for remote access
+  ansible.builtin.replace:
+    path: "{{ ansible_env.HOME }}/.kube/config"
+    regexp: 'server: https://127.0.0.1:6443'
+    replace: 'server: https://{{ k3s_master_ip }}:6443'
+  become: yes
+
+- name: Verify K3s installation
+  ansible.builtin.command: kubectl get nodes -o wide
+  register: k3s_nodes
+  changed_when: false
+  become: yes
+  environment:
+    KUBECONFIG: /etc/rancher/k3s/k3s.yaml
+
+- name: Display K3s nodes
+  ansible.builtin.debug:
+    var: k3s_nodes.stdout_lines

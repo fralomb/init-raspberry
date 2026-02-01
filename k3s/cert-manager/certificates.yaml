@@ -1,0 +1,65 @@
+---
+# Certificate resources for the cluster
+# These will automatically request and renew certificates from Let's Encrypt
+
+# Wildcard certificate for the gateway
+# This certificate will be used by the main Gateway for HTTPS termination
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: wildcard-tls
+  namespace: gateway-infra
+spec:
+  # Secret name where the certificate will be stored
+  secretName: wildcard-tls
+  # Duration and renewal settings
+  duration: 2160h    # 90 days
+  renewBefore: 360h  # Renew 15 days before expiry
+  # Certificate subject
+  subject:
+    organizations:
+      - "Raspberry Pi K3s Cluster"
+  # Private key settings
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  # Certificate usages
+  usages:
+    - server auth
+    - client auth
+  # DNS names for the certificate
+  dnsNames:
+    - "example.com"           # TODO: Update with your domain
+    - "*.example.com"         # Wildcard for subdomains
+  # Issuer reference - start with staging, switch to prod when ready
+  issuerRef:
+    name: letsencrypt-staging  # Change to letsencrypt-prod for production
+    kind: ClusterIssuer
+    group: cert-manager.io
+
+---
+# ArgoCD certificate
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: argocd-certificate
+  namespace: gitops
+spec:
+  secretName: argocd-certificate
+  duration: 2160h
+  renewBefore: 360h
+  subject:
+    organizations:
+      - "Raspberry Pi K3s Cluster"
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  usages:
+    - server auth
+    - client auth
+  dnsNames:
+    - "argocd.example.com"    # TODO: Update with your ArgoCD domain
+  issuerRef:
+    name: letsencrypt-staging  # Change to letsencrypt-prod for production
+    kind: ClusterIssuer
+    group: cert-manager.io

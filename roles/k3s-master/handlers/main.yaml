@@ -1,0 +1,9 @@
+---
+# Handlers for k3s-master role
+
+- name: restart k3s
+  ansible.builtin.systemd:
+    name: k3s
+    state: restarted
+    daemon_reload: yes
+  become: yes

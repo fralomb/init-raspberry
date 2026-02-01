@@ -1,0 +1,7 @@
+---
+# Default variables for system-setup role
+
+# Path to cmdline.txt (differs between Raspberry Pi OS versions)
+# For newer Raspberry Pi OS (Bookworm): /boot/firmware/cmdline.txt
+# For older Raspberry Pi OS (Bullseye): /boot/cmdline.txt
+cmdline_path: /boot/firmware/cmdline.txt

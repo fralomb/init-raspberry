@@ -1,4 +1,8 @@
 ---
+# Cert-Manager Helm Chart
+# Automates certificate management in Kubernetes
+# Docs: https://cert-manager.io/
+
 apiVersion: helm.cattle.io/v1
 kind: HelmChart
 metadata:
@@ -11,10 +15,44 @@ spec:
   createNamespace: true
   version: 1.14.5
   valuesContent: |-
+    # Install CRDs with the chart
+    installCRDs: true
+
+    # DNS01 solver configuration for wildcard certificates
     extraArgs:
       - --dns01-recursive-nameservers-only
       - --dns01-recursive-nameservers=8.8.8.8:53,1.1.1.1:53
-    installCRDs: true
+
+    # Resource limits for Raspberry Pi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+    webhook:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 32Mi
+        limits:
+          cpu: 100m
+          memory: 128Mi
+
+    cainjector:
+      resources:
+        requests:
+          cpu: 25m
+          memory: 64Mi
+        limits:
+          cpu: 100m
+          memory: 256Mi
+
+    # Disable Prometheus metrics (can be enabled later)
     prometheus:
       enabled: false
 
+    # Enable Gateway API support
+    featureGates: ExperimentalGatewayAPISupport=true

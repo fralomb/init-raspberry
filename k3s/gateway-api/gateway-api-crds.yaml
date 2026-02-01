@@ -1,0 +1,20 @@
+---
+# Gateway API CRDs - Standard Kubernetes API for ingress
+# These CRDs must be installed before installing any Gateway API implementation
+# Docs: https://gateway-api.sigs.k8s.io/
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: gateway-api-crds
+  namespace: kube-system
+spec:
+  repo: https://kubernetes-sigs.github.io/gateway-api
+  chart: gateway-api
+  targetNamespace: gateway-system
+  createNamespace: true
+  version: 1.2.0
+  valuesContent: |-
+    # Install all Gateway API CRDs (standard, experimental)
+    crds:
+      enabled: true

@@ -1,0 +1,36 @@
+---
+# Install Helm on master node
+
+- name: Check if Helm is already installed
+  ansible.builtin.command: helm version --short
+  register: helm_check
+  changed_when: false
+  failed_when: false
+
+- name: Download Helm installation script
+  ansible.builtin.get_url:
+    url: "{{ helm_install_script_url }}"
+    dest: /tmp/get_helm.sh
+    mode: '0755'
+  when: helm_check.rc != 0
+
+- name: Install Helm
+  ansible.builtin.command: /tmp/get_helm.sh
+  environment:
+    DESIRED_VERSION: "{{ helm_version }}"
+  become: yes
+  when: helm_check.rc != 0
+
+- name: Clean up Helm installation script
+  ansible.builtin.file:
+    path: /tmp/get_helm.sh
+    state: absent
+
+- name: Verify Helm installation
+  ansible.builtin.command: helm version --short
+  register: helm_version_output
+  changed_when: false
+
+- name: Display Helm version
+  ansible.builtin.debug:
+    msg: "Helm installed: {{ helm_version_output.stdout }}"

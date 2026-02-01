@@ -1,0 +1,36 @@
+---
+# Envoy Gateway - Gateway API Implementation
+# Envoy Gateway is a CNCF project that implements the Kubernetes Gateway API
+# Docs: https://gateway.envoyproxy.io/
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: envoy-gateway
+  namespace: kube-system
+spec:
+  repo: oci://docker.io/envoyproxy
+  chart: gateway-helm
+  targetNamespace: envoy-gateway-system
+  createNamespace: true
+  version: 1.1.0
+  valuesContent: |-
+    # Envoy Gateway configuration
+    config:
+      envoyGateway:
+        logging:
+          level:
+            default: info
+        gateway:
+          controllerName: gateway.envoyproxy.io/gatewayclass-controller
+
+    # Resource limits for ARM/Raspberry Pi
+    deployment:
+      replicas: 1
+      resources:
+        limits:
+          cpu: 500m
+          memory: 512Mi
+        requests:
+          cpu: 100m
+          memory: 128Mi

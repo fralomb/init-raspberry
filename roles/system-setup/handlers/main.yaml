@@ -1,0 +1,6 @@
+---
+# Handlers for system-setup role
+
+- name: reboot required
+  ansible.builtin.debug:
+    msg: "A reboot is required to apply cgroups changes. Please reboot the system manually or run: ansible -i inventory/hosts -m reboot -b k3s_cluster"

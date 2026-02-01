@@ -1,0 +1,16 @@
+---
+# Main task file for system-setup role
+# Prepares Raspberry Pi for K3s installation
+
+- name: Include OS update and upgrade tasks
+  ansible.builtin.include_tasks: update-upgrade.yaml
+
+- name: Include cgroups configuration tasks
+  ansible.builtin.include_tasks: configure-cgroups.yaml
+
+- name: Include system requirements tasks
+  ansible.builtin.include_tasks: install-requirements.yaml
+
+- name: Include Helm installation tasks
+  ansible.builtin.include_tasks: install-helm.yaml
+  when: "'k3s_master' in group_names"

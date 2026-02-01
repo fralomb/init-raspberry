@@ -1,0 +1,59 @@
+---
+# ClusterIssuers for Let's Encrypt certificates
+# These are cluster-scoped resources that can be used by any namespace
+
+# Let's Encrypt Staging - Use for testing (higher rate limits, not trusted)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-staging
+spec:
+  acme:
+    # Staging server URL
+    server: https://acme-staging-v02.api.letsencrypt.org/directory
+    # Email for certificate expiry notifications
+    email: admin@example.com  # TODO: Update with your email
+    # Secret to store the ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-staging-account-key
+    solvers:
+      # DNS01 solver using Cloudflare
+      - dns01:
+          cloudflare:
+            email: admin@example.com  # TODO: Update with your Cloudflare email
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+
+---
+# Let's Encrypt Production - Use for production (lower rate limits, trusted)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    # Production server URL
+    server: https://acme-v02.api.letsencrypt.org/directory
+    # Email for certificate expiry notifications
+    email: admin@example.com  # TODO: Update with your email
+    # Secret to store the ACME account private key
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      # DNS01 solver using Cloudflare
+      - dns01:
+          cloudflare:
+            email: admin@example.com  # TODO: Update with your Cloudflare email
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+
+---
+# Self-signed issuer for internal/development certificates
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: selfsigned-issuer
+spec:
+  selfSigned: {}
