@@ -1,11 +1,11 @@
 ---
 # GatewayClass defines the controller that manages Gateways
-# This is the cluster-scoped resource that references the Envoy Gateway controller
+# This is the cluster-scoped resource that references the Istio controller
 
 apiVersion: gateway.networking.k8s.io/v1
 kind: GatewayClass
 metadata:
-  name: envoy
+  name: istio
 spec:
-  controllerName: gateway.envoyproxy.io/gatewayclass-controller
-  description: "Envoy Gateway controller for Raspberry Pi K3s cluster"
+  controllerName: istio.io/gateway-controller
+  description: "Istio Gateway controller for Raspberry Pi K3s cluster"
