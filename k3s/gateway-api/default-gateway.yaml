@@ -1,6 +1,6 @@
 ---
 # Default Gateway for the cluster
-# This Gateway handles HTTP and HTTPS traffic using Istio
+# This Gateway handles HTTP and HTTPS traffic using Envoy Gateway
 
 apiVersion: v1
 kind: Namespace
@@ -8,7 +8,6 @@ metadata:
   name: gateway-infra
   labels:
     app.kubernetes.io/name: gateway-infra
-    istio-injection: enabled
 
 ---
 # Gateway resource - defines listeners for HTTP and HTTPS traffic
@@ -17,11 +16,8 @@ kind: Gateway
 metadata:
   name: main-gateway
   namespace: gateway-infra
-  annotations:
-    # Istio-specific annotations for gateway deployment
-    service.beta.kubernetes.io/aws-load-balancer-type: "external"
 spec:
-  gatewayClassName: istio
+  gatewayClassName: envoy
   listeners:
     # HTTP listener (port 80) - redirects to HTTPS
     - name: http

@@ -7,7 +7,7 @@ This repository contains Ansible playbooks and Kubernetes manifests to set up a 
 This project automates the setup of:
 - **Raspberry Pi OS Lite** (64-bit headless) - Recommended lightweight distribution
 - **K3s** - Lightweight Kubernetes distribution optimized for ARM
-- **Gateway API** with Istio - Modern Kubernetes ingress controller and service mesh
+- **Gateway API** with Envoy Gateway - Lightweight Kubernetes ingress controller
 - **Cert-Manager** - Automatic TLS certificate management via Let's Encrypt
 - **ArgoCD** - GitOps continuous delivery
 
@@ -98,18 +98,17 @@ ssh pi@192.168.1.100 kubectl get nodes
 
 After K3s is installed, apply the Kubernetes manifests in order:
 
-### 1. Gateway API with Istio
+### 1. Gateway API with Envoy Gateway
 
 ```bash
 # Install Gateway API CRDs
 kubectl apply -f k3s/gateway-api/gateway-api-crds.yaml
 
-# Install Istio (base, istiod, and ingress gateway)
-kubectl apply -f k3s/gateway-api/istio.yaml
+# Install Envoy Gateway
+kubectl apply -f k3s/gateway-api/envoy-gateway.yaml
 
-# Wait for Istio components to be ready
-kubectl wait --for=condition=available deployment/istiod -n istio-system --timeout=180s
-kubectl wait --for=condition=available deployment/istio-ingressgateway -n istio-ingress --timeout=120s
+# Wait for Envoy Gateway to be ready
+kubectl wait --for=condition=available deployment/envoy-gateway -n envoy-gateway-system --timeout=120s
 
 # Install GatewayClass and Gateway
 kubectl apply -f k3s/gateway-api/gateway-class.yaml
@@ -225,9 +224,9 @@ k3s_worker_extra_args: ""
 │   │   └── tasks/main.yaml
 │   └── docker/                   # Docker installation (optional)
 └── k3s/
-    ├── gateway-api/              # Gateway API configuration with Istio
+    ├── gateway-api/              # Gateway API configuration with Envoy Gateway
     │   ├── gateway-api-crds.yaml
-    │   ├── istio.yaml
+    │   ├── envoy-gateway.yaml
     │   ├── gateway-class.yaml
     │   └── default-gateway.yaml
     ├── cert-manager/             # Certificate management
@@ -346,8 +345,7 @@ sudo apt-get install policycoreutils
 - [K3s Documentation](https://docs.k3s.io/)
 - [K3s Raspberry Pi Requirements](https://docs.k3s.io/advanced#raspberry-pi)
 - [Gateway API](https://gateway-api.sigs.k8s.io/)
-- [Istio](https://istio.io/)
-- [Istio Gateway API](https://istio.io/latest/docs/tasks/traffic-management/ingress/gateway-api/)
+- [Envoy Gateway](https://gateway.envoyproxy.io/)
 - [Cert-Manager](https://cert-manager.io/)
 - [ArgoCD](https://argo-cd.readthedocs.io/)
 

@@ -1,0 +1,28 @@
+---
+# Envoy Gateway - Gateway API implementation
+# Lightweight Gateway API controller built on Envoy Proxy
+# Docs: https://gateway.envoyproxy.io/
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: envoy-gateway
+  namespace: kube-system
+spec:
+  repo: https://charts.envoyproxy.io
+  chart: envoy-gateway
+  targetNamespace: envoy-gateway-system
+  createNamespace: true
+  version: 1.1.0
+  valuesContent: |-
+    # Resource limits for Raspberry Pi
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 200m
+        memory: 256Mi
+
+    # Single replica for Raspberry Pi
+    replicas: 1
