@@ -1,0 +1,10 @@
+---
+k3s_channel: stable
+k3s_version: ""
+
+# Extra arguments passed to the k3s server
+k3s_server_args: "--write-kubeconfig-mode 644"
+
+# Copy /etc/rancher/k3s/k3s.yaml to the control machine after install
+k3s_fetch_kubeconfig: false
+k3s_kubeconfig_dest: ./k3s.yaml
