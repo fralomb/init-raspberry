@@ -1,0 +1,6 @@
+---
+k3s_channel: stable
+k3s_version: ""
+
+# Extra arguments passed to the k3s agent
+k3s_agent_args: ""

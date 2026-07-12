@@ -1,0 +1,43 @@
+---
+
+- name: Download k3s install script
+  get_url:
+    url: https://get.k3s.io
+    dest: /usr/local/bin/k3s-install.sh
+    mode: 0755
+
+- name: Install k3s server
+  command: /usr/local/bin/k3s-install.sh
+  environment:
+    INSTALL_K3S_CHANNEL: "{{ k3s_channel }}"
+    INSTALL_K3S_VERSION: "{{ k3s_version }}"
+    INSTALL_K3S_EXEC: "server {{ k3s_server_args }}"
+  args:
+    creates: /usr/local/bin/k3s
+
+- name: Ensure k3s service is started and enabled at boot
+  service:
+    name: k3s
+    state: started
+    enabled: true
+
+- name: Wait for node token to be generated
+  wait_for:
+    path: /var/lib/rancher/k3s/server/node-token
+    timeout: 120
+
+- name: Read node token
+  slurp:
+    src: /var/lib/rancher/k3s/server/node-token
+  register: k3s_node_token_file
+
+- name: Store node token as fact for the agents
+  set_fact:
+    k3s_node_token: "{{ k3s_node_token_file.content | b64decode | trim }}"
+
+- name: Fetch kubeconfig to the control machine
+  fetch:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "{{ k3s_kubeconfig_dest }}"
+    flat: yes
+  when: k3s_fetch_kubeconfig
