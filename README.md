@@ -1,38 +1,121 @@
-# Tools to install into a Raspberry
-The following Ansible playbook is meant to install some of the tools and dependencies in a Raspberry system.
+# Raspberry Pi k3s cluster bootstrap
 
-## Install Ansible
-In the  case i need to execute an Ansible playbook directly on a Raspberry i'll need also to install Ansible itlsef.
-To do that, the bash script `install-ansible` will do the job.
+Ansible playbooks to turn one or more fresh Raspberry Pis into a lightweight
+[k3s](https://docs.k3s.io) Kubernetes cluster: one master node and zero or more workers.
 
-## Install Docker
-The role `docker` will install all the Docker deamon and the Docker-Compose dependencies. 
-The Docker-Compose tool is installed via pip, since in the `docker/compose` release page there's no release built for `arm`.
+## 1. Choose the OS
 
-### Useful links
-- Docker doc: [link](https://docs.docker.com/engine/install/debian/)
-- Install Docker Engine: [link](https://docs.docker.com/engine/install/ubuntu/)
-- Install Docker-Compose: [link](https://docs.docker.com/compose/install/)
+**Required: Raspberry Pi OS Lite (64-bit), Bookworm (Debian 12) or later.**
 
-## Install K3s
-Doc: `https://docs.k3s.io`
+These playbooks target that baseline *only*. They depend on behaviour introduced in
+Bookworm and make no attempt to support older releases or other distributions:
 
-Installation requirements for Raspberry Pi OS: `https://docs.k3s.io/advanced#raspberry-pi`
+- the kernel command line lives at `/boot/firmware/cmdline.txt` (moved from `/boot/`)
+- cgroup v2 unified hierarchy — `memory` is exposed via `/sys/fs/cgroup/cgroup.controllers`
+- swap is provided by zram (`systemd-zram-setup@zram0`), not `dphys-swapfile`, so the
+  playbooks do no swap handling at all: zram is compressed RAM, never touches the SD
+  card, and k3s tolerates it
 
-- Enable `cgroups` by appending `cgroup_memory=1 cgroup_enable=memory` to `/boot/cmdline.txt`.
-- vxlan support on Raspberry Pi has been moved into a separate kernel module
-    ```
-    sudo apt update --allow-releaseinfo-change
-    sudo upgrade -y
-    sudo apt install linux-modules-extra-raspi
-    ```
-- Using wireguard-native as the Flannel backend required
-    ```
-    sudo apt install -y wireguard
-    ```
-- Error `restorecon: command not found` --> `sudo apt-get install policycoreutils`
-### Access K3s cluster from outside
-The kubeconfig file stored at `/etc/rancher/k3s/k3s.yaml` is used to configure access to the Kubernetes cluster.
+The 64-bit variant is required — most container images are arm64 only.
+
+Verified on Raspberry Pi OS Trixie (Debian 13), arm64, Raspberry Pi 4 Model B.
+
+DietPi, Ubuntu Server and other Debian derivatives are **not supported and not tested**;
+expect to adjust the `common` role if you use one.
+
+## 2. Flash the SD card
+
+Use the official [Raspberry Pi Imager](https://www.raspberrypi.com/software/) (`brew install raspberry-pi-imager` on macOS):
+
+1. Choose device → your Pi model.
+2. Choose OS → *Raspberry Pi OS (other)* → **Raspberry Pi OS Lite (64-bit)**.
+3. Choose storage → the SD card.
+4. Before writing, open the OS customisation settings (`Cmd+Shift+X` / "Edit settings") and set:
+   - **Hostname**: unique per node (e.g. `k3s-master`, `k3s-worker-1`).
+   - **Username/password**: e.g. user `pi`.
+   - **Enable SSH** with public-key authentication (paste your `~/.ssh/id_*.pub`).
+   - **Wi-Fi** credentials only if not using ethernet (prefer ethernet for cluster nodes).
+5. Write, boot the Pi, and verify access: `ssh pi@<node-ip>`.
+
+Repeat for every node. Give each node a static IP (DHCP reservation on the router is the
+easiest way) so the inventory stays stable.
+
+## 3. Configure the inventory
+
+Edit [inventory/hosts](inventory/hosts): one host in `[master]`, zero or more in `[workers]`.
+
+```ini
+[master]
+k3s-master ansible_host=192.168.1.10
+
+[workers]
+k3s-worker-1 ansible_host=192.168.1.11
+```
+
+## 4. Run the playbook
+
+```bash
+ansible-playbook playbook.yaml -K
+```
+
+`-K` prompts for the sudo password. Raspberry Pi OS only grants passwordless sudo to the
+legacy default user, so an Imager-created user needs it. If your nodes have different sudo
+passwords, use an `ansible-vault` encrypted `ansible_become_password` per host instead.
+
+What it does:
+
+- **`common` role** (all nodes): installs base packages, appends
+  `cgroup_memory=1 cgroup_enable=memory cgroup_enable=cpuset` to
+  `/boot/firmware/cmdline.txt`, and reboots if the kernel parameters changed. Note the
+  Pi firmware injects `cgroup_disable=memory`; the appended `cgroup_enable=memory`
+  comes later on the command line and wins.
+- **`k3s-server` role** (master): installs k3s in server mode via the official
+  `get.k3s.io` script and reads the generated node token.
+- **`k3s-agent` role** (workers): installs k3s in agent mode, joining the master with
+  the token collected in the previous play. With an empty `[workers]` group this play
+  simply skips, leaving a single-node cluster.
+
+`k3s_version` in [group_vars/all.yaml](group_vars/all.yaml) is pinned to an exact
+release. This keeps every node on the same version and skips the `update.k3s.io`
+channel lookup the install script would otherwise do. Blank it to track `k3s_channel`
+(`stable`/`latest`) instead.
+
+## 5. Verify and access the cluster
+
+On the master:
+
+```bash
+sudo k3s kubectl get nodes -o wide
+```
+
+From your machine, `k3s_fetch_kubeconfig` (on by default) pulls the kubeconfig to
+`~/.kube/config-raspberry` at the end of the master play, rewrites the server address
+from `127.0.0.1` to the master's IP, renames the cluster/user/context from `default` to
+`localk3s`, and chmods it to `0600`. It is written outside the repo deliberately — it
+holds a cluster-admin client certificate and key.
+
+```bash
+export KUBECONFIG=~/.kube/config-raspberry
+kubectl get nodes
+```
+
+To merge it into your main kubeconfig instead:
+
+```bash
+KUBECONFIG=~/.kube/config:~/.kube/config-raspberry kubectl config view --flatten > ~/.kube/merged
+mv ~/.kube/merged ~/.kube/config
+kubectl config use-context localk3s
+```
+
+Change the destination and the name with `k3s_kubeconfig_dest` and `k3s_context_name` in
+[roles/k3s-server/defaults/main.yaml](roles/k3s-server/defaults/main.yaml).
+
+### Troubleshooting
+
+- `k3s check-config` complains about cgroups → confirm the parameters landed in
+  `/proc/cmdline`; the node needs a reboot after editing `cmdline.txt`.
+- Using `wireguard-native` as Flannel backend requires `sudo apt install wireguard`.
+- `restorecon: command not found` → `sudo apt-get install policycoreutils`.
 
 ## K3s dependencies
 ### Argocd
@@ -67,3 +150,23 @@ Then, create the secret using the file:
 kubectl create secret generic config-cloudflare-ddns --from-file=config.json -n ddns
 ```
 
+## Extras
+
+### Install Docker (optional)
+k3s ships its own containerd, so Docker is **not** required for the cluster. If a node
+needs standalone Docker anyway:
+
+```bash
+ansible-playbook docker-playbook.yaml
+```
+
+Docker-Compose is installed via pip, since the `docker/compose` release page has no
+build for `arm`.
+
+- Docker doc: [link](https://docs.docker.com/engine/install/debian/)
+- Install Docker Engine: [link](https://docs.docker.com/engine/install/ubuntu/)
+- Install Docker-Compose: [link](https://docs.docker.com/compose/install/)
+
+### Install Ansible on the Pi itself
+Only needed to run playbooks directly on a Raspberry: the bash script
+`install-ansible` (run with sudo) will do the job.

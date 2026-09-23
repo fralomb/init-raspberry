@@ -1,0 +1,6 @@
+# Fetched kubeconfig — contains cluster-admin client cert and key
+k3s.yaml
+*.kubeconfig
+
+# Ansible
+*.retry

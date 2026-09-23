@@ -1,0 +1,6 @@
+---
+
+- name: Setup Docker on Raspberry
+  hosts: all
+  roles:
+    - role: docker

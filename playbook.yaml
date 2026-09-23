@@ -1,7 +1,19 @@
 ---
 
-- name: Setup Raspberry
-  hosts: all
+- name: Prepare Raspberry Pi nodes
+  hosts: k3s_cluster
+  become: yes
   roles:
-    - role: docker
+    - role: common
 
+- name: Setup k3s master
+  hosts: master
+  become: yes
+  roles:
+    - role: k3s-server
+
+- name: Setup k3s workers
+  hosts: workers
+  become: yes
+  roles:
+    - role: k3s-agent

@@ -1,0 +1,6 @@
+---
+
+- name: Reboot
+  reboot:
+    msg: Rebooting to apply cgroup kernel parameters
+    reboot_timeout: 300

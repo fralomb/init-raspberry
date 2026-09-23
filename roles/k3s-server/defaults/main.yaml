@@ -1,0 +1,15 @@
+---
+k3s_channel: stable
+k3s_version: ""
+
+# Extra arguments passed to the k3s server
+k3s_server_args: "--write-kubeconfig-mode 644"
+
+# Copy /etc/rancher/k3s/k3s.yaml to the control machine after install.
+# Kept outside the repo: it holds cluster-admin client cert and key.
+k3s_fetch_kubeconfig: true
+k3s_kubeconfig_dest: "{{ lookup('env', 'HOME') }}/.kube/config-raspberry"
+
+# k3s names the cluster, user and context all "default", which collides when this
+# kubeconfig is merged with others.
+k3s_context_name: localk3s
