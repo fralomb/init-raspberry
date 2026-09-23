@@ -5,14 +5,23 @@ Ansible playbooks to turn one or more fresh Raspberry Pis into a lightweight
 
 ## 1. Choose the OS
 
-**Recommended: Raspberry Pi OS Lite (64-bit)** — official Debian-based image, no desktop,
-~60-80MB RAM idle, best driver/firmware support, and the reference platform in the
-[k3s Raspberry Pi docs](https://docs.k3s.io/installation/requirements#operating-systems).
-The 64-bit variant is required for many container images (arm64).
+**Required: Raspberry Pi OS Lite (64-bit), Bookworm (Debian 12) or later.**
 
-Alternative if you want the absolute minimum footprint: [DietPi](https://dietpi.com)
-(~30-50MB RAM idle, ~500MB disk). It is also Debian-based, so these playbooks work on it
-too, but Raspberry Pi OS Lite is the safer default for hardware support.
+These playbooks target that baseline *only*. They depend on behaviour introduced in
+Bookworm and make no attempt to support older releases or other distributions:
+
+- the kernel command line lives at `/boot/firmware/cmdline.txt` (moved from `/boot/`)
+- cgroup v2 unified hierarchy — `memory` is exposed via `/sys/fs/cgroup/cgroup.controllers`
+- swap is provided by zram (`systemd-zram-setup@zram0`), not `dphys-swapfile`, so the
+  playbooks do no swap handling at all: zram is compressed RAM, never touches the SD
+  card, and k3s tolerates it
+
+The 64-bit variant is required — most container images are arm64 only.
+
+Verified on Raspberry Pi OS Trixie (Debian 13), arm64, Raspberry Pi 4 Model B.
+
+DietPi, Ubuntu Server and other Debian derivatives are **not supported and not tested**;
+expect to adjust the `common` role if you use one.
 
 ## 2. Flash the SD card
 
@@ -46,23 +55,30 @@ k3s-worker-1 ansible_host=192.168.1.11
 ## 4. Run the playbook
 
 ```bash
-ansible-playbook playbook.yaml
+ansible-playbook playbook.yaml -K
 ```
+
+`-K` prompts for the sudo password. Raspberry Pi OS only grants passwordless sudo to the
+legacy default user, so an Imager-created user needs it. If your nodes have different sudo
+passwords, use an `ansible-vault` encrypted `ansible_become_password` per host instead.
 
 What it does:
 
 - **`common` role** (all nodes): installs base packages, appends
-  `cgroup_memory=1 cgroup_enable=memory cgroup_enable=cpuset` to `cmdline.txt`
-  (`/boot/firmware/cmdline.txt` on Bookworm+, `/boot/cmdline.txt` on older releases),
-  disables `dphys-swapfile`, and reboots if the kernel parameters changed.
+  `cgroup_memory=1 cgroup_enable=memory cgroup_enable=cpuset` to
+  `/boot/firmware/cmdline.txt`, and reboots if the kernel parameters changed. Note the
+  Pi firmware injects `cgroup_disable=memory`; the appended `cgroup_enable=memory`
+  comes later on the command line and wins.
 - **`k3s-server` role** (master): installs k3s in server mode via the official
   `get.k3s.io` script and reads the generated node token.
 - **`k3s-agent` role** (workers): installs k3s in agent mode, joining the master with
   the token collected in the previous play. With an empty `[workers]` group this play
   simply skips, leaving a single-node cluster.
 
-Pin a k3s version or change channel in [group_vars/all.yaml](group_vars/all.yaml)
-(`k3s_version`, `k3s_channel`).
+`k3s_version` in [group_vars/all.yaml](group_vars/all.yaml) is pinned to an exact
+release. This keeps every node on the same version and skips the `update.k3s.io`
+channel lookup the install script would otherwise do. Blank it to track `k3s_channel`
+(`stable`/`latest`) instead.
 
 ## 5. Verify and access the cluster
 
@@ -72,22 +88,32 @@ On the master:
 sudo k3s kubectl get nodes -o wide
 ```
 
-From outside, copy `/etc/rancher/k3s/k3s.yaml` from the master (or set
-`k3s_fetch_kubeconfig: true` in the `k3s-server` role vars), then replace `127.0.0.1`
-with the master IP:
+From your machine, `k3s_fetch_kubeconfig` (on by default) pulls the kubeconfig to
+`~/.kube/config-raspberry` at the end of the master play, rewrites the server address
+from `127.0.0.1` to the master's IP, renames the cluster/user/context from `default` to
+`localk3s`, and chmods it to `0600`. It is written outside the repo deliberately — it
+holds a cluster-admin client certificate and key.
 
 ```bash
-sed 's/127.0.0.1/<master-ip>/' k3s.yaml > ~/.kube/config-raspberry
 export KUBECONFIG=~/.kube/config-raspberry
 kubectl get nodes
 ```
+
+To merge it into your main kubeconfig instead:
+
+```bash
+KUBECONFIG=~/.kube/config:~/.kube/config-raspberry kubectl config view --flatten > ~/.kube/merged
+mv ~/.kube/merged ~/.kube/config
+kubectl config use-context localk3s
+```
+
+Change the destination and the name with `k3s_kubeconfig_dest` and `k3s_context_name` in
+[roles/k3s-server/defaults/main.yaml](roles/k3s-server/defaults/main.yaml).
 
 ### Troubleshooting
 
 - `k3s check-config` complains about cgroups → confirm the parameters landed in
   `/proc/cmdline`; the node needs a reboot after editing `cmdline.txt`.
-- On Ubuntu (not Raspberry Pi OS) the vxlan module is separate:
-  `sudo apt install linux-modules-extra-raspi`.
 - Using `wireguard-native` as Flannel backend requires `sudo apt install wireguard`.
 - `restorecon: command not found` → `sudo apt-get install policycoreutils`.
 

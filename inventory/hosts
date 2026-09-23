@@ -1,9 +1,9 @@
 [master]
-# k3s-master ansible_host=192.168.1.10
+k3s-master ansible_host=192.168.1.16
 
 [workers]
 # Zero or more worker nodes. Leave empty for a single-node cluster.
-# k3s-worker-1 ansible_host=192.168.1.11
+k3s-worker-1 ansible_host=192.168.1.15
 # k3s-worker-2 ansible_host=192.168.1.12
 
 [k3s_cluster:children]

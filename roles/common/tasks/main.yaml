@@ -22,21 +22,3 @@
     replace: '\1 {{ cgroup_options }}'
   notify:
     - Reboot
-
-- name: Check if dphys-swapfile is installed
-  stat:
-    path: /sbin/dphys-swapfile
-  register: dphys_swapfile
-
-- name: Disable swap
-  when: disable_swap and dphys_swapfile.stat.exists
-  block:
-    - name: Stop and disable swap service
-      service:
-        name: dphys-swapfile
-        state: stopped
-        enabled: false
-
-    - name: Turn off active swap
-      command: dphys-swapfile swapoff
-      when: ansible_memory_mb.swap.total | default(0) > 0

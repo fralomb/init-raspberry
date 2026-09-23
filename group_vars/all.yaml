@@ -1,6 +1,7 @@
 ---
 ansible_python_interpreter: /usr/bin/python3
 
-# K3s release channel (stable, latest) or pin an exact version (e.g. v1.33.1+k3s1)
+# Pinned version: keeps master and workers identical and avoids the update.k3s.io
+# channel lookup entirely. Blank it to track k3s_channel instead.
 k3s_channel: stable
-k3s_version: ""
+k3s_version: "v1.36.4+k3s1"
