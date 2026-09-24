@@ -137,7 +137,7 @@ kubectl -n gitops get pods,ingressroute
 Prerequisites:
 - `argocd.homelab.francesco-lombardo.it` resolves to the master node (local DNS or a Cloudflare record).
 - TLS uses Traefik's default TLSStore: the `*.homelab.francesco-lombardo.it` name is part of the
-  `francesco-lombardo-it-cert` certificate in [k3s/traefik/traefik_config.yaml](k3s/traefik/traefik_config.yaml).
+  `francesco-lombardo-it-cert` certificate in [k3s/cert-manager/cloudflare-issuer.yaml](k3s/cert-manager/cloudflare-issuer.yaml).
   Without it, Traefik serves its self-signed certificate.
 
 Initial `admin` password:
@@ -146,17 +146,25 @@ kubectl -n gitops get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 ```
 
 ### Traefik
-TODO
+k3s ships Traefik v3 as a packaged component. [k3s/traefik/traefik_config.yaml](k3s/traefik/traefik_config.yaml)
+is a `HelmChartConfig` that overrides its values (HTTP→HTTPS redirect, default TLSStore,
+dashboard, access logs). It is installed through `k3s_addons` like Argo CD. The values target the
+Traefik chart version bundled with the pinned `k3s_version` (chart 40.1.x for `v1.36.4+k3s1`):
+re-check them against that chart's `values.yaml` when bumping k3s.
 
 ### Cert-Manager
 [How to configure](https://github.com/traefik/traefik-helm-chart/blob/master/EXAMPLES.md#provide-default-certificate-with-cert-manager-and-cloudflare-dns) Traefik with Cert-Manger for signed certificates.
 
-Install `Cert-Manager` via [Helm chart](https://cert-manager.io/docs/installation/helm/).
+`Cert-Manager` is installed via its [Helm chart](https://cert-manager.io/docs/installation/helm/)
+([k3s/cert-manager/cert-manager-chart.yaml](k3s/cert-manager/cert-manager-chart.yaml)), and the
+Cloudflare DNS-01 `Issuer` plus the wildcard `Certificate`s live in
+[k3s/cert-manager/cloudflare-issuer.yaml](k3s/cert-manager/cloudflare-issuer.yaml). Both are in
+`k3s_addons`; k3s retries the issuer file until the chart has installed the cert-manager CRDs.
 
-
-Create a secret containing the API token of Cloudflare in the `traefik` namespace:
+Create a secret containing the API token of Cloudflare in the `kube-system` namespace (where the
+`Issuer` and Traefik live):
 ```
-kubectl create secret generic cloudflare --from-literal=api-token=XXX --type=Opaque --namespace traefik
+kubectl create secret generic cloudflare --from-literal=api-token=XXX --type=Opaque --namespace kube-system
 ```
 
 ### Cloudflare DDNS

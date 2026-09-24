@@ -9,7 +9,13 @@ k3s_server_args: "--write-kubeconfig-mode 644"
 # auto-deploying AddOns: k3s applies every file in k3s_manifests_dir on start and
 # whenever it changes.
 k3s_manifests_dir: /var/lib/rancher/k3s/server/manifests
+# Files land flat in that directory, so basenames must be unique and must not
+# clash with the k3s packaged components (traefik.yaml, coredns.yaml, ...).
 k3s_addons:
+  - k3s/traefik/traefik_config.yaml
+  - k3s/cert-manager/cert-manager-chart.yaml
+  # Needs the cert-manager CRDs: k3s retries it until the chart above installs them.
+  - k3s/cert-manager/cloudflare-issuer.yaml
   - k3s/argocd/argocd-chart.yaml
 
 # Copy /etc/rancher/k3s/k3s.yaml to the control machine after install.
