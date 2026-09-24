@@ -1,0 +1,22 @@
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: tailscale-operator
+  namespace: kube-system
+spec:
+  repo: https://pkgs.tailscale.com/helmcharts
+  chart: tailscale-operator
+  targetNamespace: tailscale
+  createNamespace: true
+  version: 1.102.4
+  # oauth.* left empty on purpose: the operator mounts the pre-created
+  # `operator-oauth` Secret (client_id, client_secret) from the tailscale namespace.
+  valuesContent: |-
+    operatorConfig:
+      hostname: homelab-k8s-operator
+      image:
+        tag: v1.102.4
+    proxyConfig:
+      image:
+        tag: v1.102.4

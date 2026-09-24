@@ -17,6 +17,9 @@ k3s_addons:
   # Needs the cert-manager CRDs: k3s retries it until the chart above installs them.
   - k3s/cert-manager/cloudflare-issuer.yaml
   - k3s/argocd/argocd-chart.yaml
+  - k3s/tailscale/tailscale-operator-chart.yaml
+  # Needs the tailscale.com CRDs: k3s retries it until the operator chart installs them.
+  - k3s/tailscale/subnet-router.yaml
 
 # Copy /etc/rancher/k3s/k3s.yaml to the control machine after install.
 # Kept outside the repo: it holds cluster-admin client cert and key.

@@ -135,7 +135,7 @@ kubectl -n gitops get pods,ingressroute
 ```
 
 Prerequisites:
-- `argocd.homelab.francesco-lombardo.it` resolves to the master node (local DNS or a Cloudflare record).
+- `argocd.homelab.francesco-lombardo.it` resolves to the master node (see [Tailscale](#tailscale-private-access)).
 - TLS uses Traefik's default TLSStore: the `*.homelab.francesco-lombardo.it` name is part of the
   `francesco-lombardo-it-cert` certificate in [k3s/cert-manager/cloudflare-issuer.yaml](k3s/cert-manager/cloudflare-issuer.yaml).
   Without it, Traefik serves its self-signed certificate.
@@ -167,20 +167,48 @@ Create a secret containing the API token of Cloudflare in the `kube-system` name
 kubectl create secret generic cloudflare --from-literal=api-token=XXX --type=Opaque --namespace kube-system
 ```
 
-### Cloudflare DDNS
-Allows to dynamically change the IP address of the domains defined in Cloudflare using an API Token.
-Based on this [repo](https://github.com/timothymiller/cloudflare-ddns).
+### Tailscale (private access)
+Nothing in the homelab is exposed to the internet: no router port forwarding, no DDNS. Remote
+access goes through [Tailscale](https://tailscale.com/kb/1236/kubernetes-operator), running in the
+cluster:
 
-At the moment, it is using a secret injected in the deployment, but it needs to be re-thinked using some kind of Secrets management tool.
+- [k3s/tailscale/tailscale-operator-chart.yaml](k3s/tailscale/tailscale-operator-chart.yaml) installs
+  the Tailscale Kubernetes operator in the `tailscale` namespace.
+- [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml) is a `Connector` that makes the
+  operator run a subnet router advertising `192.168.1.0/24`, so tailnet devices reach the LAN (and
+  Traefik on the master) as if they were at home. Narrow `advertiseRoutes` to the node IPs (`/32`)
+  to expose only the cluster.
 
-In order to generate the configuration use `envsubst` to substitute the cloudflare secrets:
-```
-CF_API_TOKEN="XXX" CF_ZONE_ID_1="YYY" CF_ZONE_ID_2="ZZZ" envsubst < k3s/ddns/config.json > config.json
-```
-Then, create the secret using the file:
-```
-kubectl create secret generic config-cloudflare-ddns --from-file=config.json -n ddns
-```
+DNS is a single static Cloudflare record, **DNS only** (grey cloud): `*.homelab.francesco-lombardo.it`
+`A` → `192.168.1.16` (the master's LAN IP). The same name works at home without Tailscale and remotely
+through it; certificates keep working since the DNS-01 challenge needs no inbound traffic. If a
+name does not resolve at home, the router's DNS rebinding protection is dropping answers with a
+private IP: allow the domain there.
+
+One-time setup in the [Tailscale admin console](https://login.tailscale.com/admin):
+
+1. Access controls: let the operator own its tags and auto-approve the route:
+   ```json
+   "tagOwners": {
+     "tag:k8s-operator": [],
+     "tag:k8s": ["tag:k8s-operator"]
+   },
+   "autoApprovers": {
+     "routes": { "192.168.1.0/24": ["tag:k8s"] }
+   }
+   ```
+2. Settings → Trust credentials: create an OAuth client with the scopes listed in the
+   [operator docs](https://tailscale.com/kb/1236/kubernetes-operator#prerequisites) (`Devices Core`,
+   `Auth Keys`, `Services` write) and tag `tag:k8s-operator`.
+3. Store it in the cluster (the operator pod waits for this Secret):
+   ```
+   kubectl create namespace tailscale
+   kubectl -n tailscale create secret generic operator-oauth \
+     --from-literal=client_id=XXX --from-literal=client_secret=YYY
+   ```
+
+Check with `kubectl get connector` and `kubectl -n tailscale get pods`; the `homelab-subnet-router`
+device then shows up in the admin console with the route approved.
 
 ## Extras
 
