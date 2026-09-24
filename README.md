@@ -119,7 +119,31 @@ Change the destination and the name with `k3s_kubeconfig_dest` and `k3s_context_
 
 ## K3s dependencies
 ### Argocd
-TODO
+Installed by the `k3s-server` role through the k3s
+[auto-deploying AddOns](https://docs.k3s.io/installation/packaged-components#auto-deploying-manifests-addons):
+every file listed in `k3s_addons` ([roles/k3s-server/defaults/main.yaml](roles/k3s-server/defaults/main.yaml))
+is copied to `/var/lib/rancher/k3s/server/manifests/`, and k3s applies it on start and on
+every change. [k3s/argocd/argocd-chart.yaml](k3s/argocd/argocd-chart.yaml) is a `HelmChart`
+that installs Argo CD in the `gitops` namespace, plus a Traefik `IngressRoute` exposing the
+dashboard (and the gRPC API for the `argocd` CLI) at `https://argocd.homelab.francesco-lombardo.it`.
+
+To change the Argo CD config, edit the manifest and re-run the playbook. Check the install with:
+```
+kubectl -n kube-system get helmchart argocd
+kubectl -n kube-system logs job/helm-install-argocd
+kubectl -n gitops get pods,ingressroute
+```
+
+Prerequisites:
+- `argocd.homelab.francesco-lombardo.it` resolves to the master node (local DNS or a Cloudflare record).
+- TLS uses Traefik's default TLSStore: the `*.homelab.francesco-lombardo.it` name is part of the
+  `francesco-lombardo-it-cert` certificate in [k3s/traefik/traefik_config.yaml](k3s/traefik/traefik_config.yaml).
+  Without it, Traefik serves its self-signed certificate.
+
+Initial `admin` password:
+```
+kubectl -n gitops get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+```
 
 ### Traefik
 TODO

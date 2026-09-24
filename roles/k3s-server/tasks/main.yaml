@@ -36,6 +36,15 @@
     state: started
     enabled: true
 
+- name: Install auto-deploying AddOns manifests
+  copy:
+    src: "{{ playbook_dir }}/{{ item }}"
+    dest: "{{ k3s_manifests_dir }}/{{ item | basename }}"
+    owner: root
+    group: root
+    mode: 0600
+  loop: "{{ k3s_addons }}"
+
 - name: Wait for node token to be generated
   wait_for:
     path: /var/lib/rancher/k3s/server/node-token

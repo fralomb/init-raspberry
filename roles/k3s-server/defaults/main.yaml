@@ -5,6 +5,13 @@ k3s_version: ""
 # Extra arguments passed to the k3s server
 k3s_server_args: "--write-kubeconfig-mode 644"
 
+# Manifests (paths relative to the playbook directory) installed through the k3s
+# auto-deploying AddOns: k3s applies every file in k3s_manifests_dir on start and
+# whenever it changes.
+k3s_manifests_dir: /var/lib/rancher/k3s/server/manifests
+k3s_addons:
+  - k3s/argocd/argocd-chart.yaml
+
 # Copy /etc/rancher/k3s/k3s.yaml to the control machine after install.
 # Kept outside the repo: it holds cluster-admin client cert and key.
 k3s_fetch_kubeconfig: true
