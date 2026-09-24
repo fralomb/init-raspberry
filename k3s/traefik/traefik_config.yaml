@@ -10,7 +10,6 @@ spec:
       default:
         certificates:
         - secretName: francesco-lombardo-it-tls
-        - secretName: daniel-e-luana-sposi-it-tls
         defaultCertificate:
           secretName: francesco-lombardo-it-tls
     logs:

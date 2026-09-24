@@ -29,23 +29,7 @@ metadata:
 spec:
   secretName: francesco-lombardo-it-tls
   dnsNames:
-    - "francesco-lombardo.it"
-    - "*.francesco-lombardo.it"
     - "*.homelab.francesco-lombardo.it"
-  issuerRef:
-    name: cloudflare-letsencrypt
-    kind: Issuer
----
-apiVersion: cert-manager.io/v1
-kind: Certificate
-metadata:
-  name: daniel-e-luana-sposi-it-cert
-  namespace: kube-system
-spec:
-  secretName: daniel-e-luana-sposi-it-tls
-  dnsNames:
-    - "daniel-e-luana-sposi.it"
-    - "*.daniel-e-luana-sposi.it"
   issuerRef:
     name: cloudflare-letsencrypt
     kind: Issuer
