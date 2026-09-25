@@ -176,8 +176,8 @@ cluster:
   the Tailscale Kubernetes operator in the `tailscale` namespace.
 - [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml) is a `Connector` that makes the
   operator run a subnet router advertising `192.168.1.0/24`, so tailnet devices reach the LAN (and
-  Traefik on the master) as if they were at home. Narrow `advertiseRoutes` to the node IPs (`/32`)
-  to expose only the cluster.
+  Traefik on the master) as if they were at home. What tailnet users can actually reach through it
+  is decided by the [tailnet policy](#tailnet-policy).
 
 DNS is a single static Cloudflare record, **DNS only** (grey cloud): `*.homelab.francesco-lombardo.it`
 `A` → `192.168.1.16` (the master's LAN IP). The same name works at home without Tailscale and remotely
@@ -187,16 +187,7 @@ private IP: allow the domain there.
 
 One-time setup in the [Tailscale admin console](https://login.tailscale.com/admin):
 
-1. Access controls: let the operator own its tags and auto-approve the route:
-   ```json
-   "tagOwners": {
-     "tag:k8s-operator": [],
-     "tag:k8s": ["tag:k8s-operator"]
-   },
-   "autoApprovers": {
-     "routes": { "192.168.1.0/24": ["tag:k8s"] }
-   }
-   ```
+1. Access controls: apply the [tailnet policy](#tailnet-policy) below.
 2. Settings → Trust credentials: create an OAuth client with the scopes listed in the
    [operator docs](https://tailscale.com/kb/1236/kubernetes-operator#prerequisites) (`Devices Core`,
    `Auth Keys`, `Services` write) and tag `tag:k8s-operator`.
@@ -209,6 +200,53 @@ One-time setup in the [Tailscale admin console](https://login.tailscale.com/admi
 
 Check with `kubectl get connector` and `kubectl -n tailscale get pods`; the `homelab-subnet-router`
 device then shows up in the admin console with the route approved.
+
+#### Tailnet policy
+Paste into Access controls → JSON editor, replacing the default allow-all policy. The subnet
+router enforces these grants on routed traffic, so the tailnet only reaches the homelab, not the
+whole home network.
+
+```jsonc
+{
+  // The operator tags itself tag:k8s-operator and the devices it creates tag:k8s.
+  "tagOwners": {
+    "tag:k8s-operator": [],
+    "tag:k8s": ["tag:k8s-operator"]
+  },
+  // Approve the Connector's route without a manual click.
+  "autoApprovers": {
+    "routes": { "192.168.1.0/24": ["tag:k8s"] }
+  },
+  "grants": [
+    // Your own devices can talk to each other
+    { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"] },
+    // Homelab services through Traefik on the master
+    { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:443", "tcp:80"] },
+    // SSH to the k3s nodes (master + worker) and the Kubernetes API
+    { "src": ["autogroup:member"], "dst": ["192.168.1.15/32", "192.168.1.16/32"], "ip": ["tcp:22"] },
+    { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:6443"] }
+  ],
+  // Checked on every save: a failing test rejects the change and the old policy stays active.
+  "tests": [
+    {
+      "src": "fra.lombardo92@gmail.com",
+      "accept": ["192.168.1.16:443", "192.168.1.15:22"],
+      // Home router UI and the unauthenticated Traefik dashboard must stay unreachable
+      "deny": ["192.168.1.1:443", "192.168.1.16:8080"]
+    }
+  ]
+}
+```
+
+- `tagOwners` and `autoApprovers` grant no access; only `grants` does. Tagged devices (operator,
+  subnet router) get no grant, so they cannot open connections towards your devices.
+- `tests` does not change access: each entry asserts that traffic from `src` is allowed to every
+  `accept` destination and blocked for every `deny` one (`host:port`). Update it together with
+  the grants, and change `src` if your Tailscale login differs.
+- Keep the node IPs in sync with [inventory/hosts](inventory/hosts) and the route with
+  [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml).
+- Add back an `ssh` section only if you use Tailscale SSH; plain SSH through the subnet route uses
+  the `tcp:22` grant.
 
 ## Extras
 
