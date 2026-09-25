@@ -6,6 +6,13 @@
   roles:
     - role: common
 
+- name: Mount USB SSDs
+  hosts: k3s_cluster
+  become: yes
+  roles:
+    - role: ssd-storage
+      when: ssd_storage | default(false)
+
 - name: Setup k3s master
   hosts: master
   become: yes
@@ -17,3 +24,23 @@
   become: yes
   roles:
     - role: k3s-agent
+
+# Last, so the workers have registered. Labels are set through the API rather than
+# --node-label, which k3s only applies when a node first registers. The node name is
+# the inventory hostname, which must match the Pi's hostname.
+- name: Label k3s nodes
+  hosts: k3s_cluster
+  become: yes
+  tasks:
+    - name: Apply k3s_node_labels from the host vars
+      command: >-
+        k3s kubectl label node {{ inventory_hostname }} --overwrite
+        {{ k3s_node_labels | dict2items | map(attribute='key') | zip(k3s_node_labels.values()) | map('join', '=') | join(' ') }}
+      delegate_to: "{{ groups['master'][0] }}"
+      when: k3s_node_labels is defined
+      register: k3s_label
+      changed_when: "'not labeled' not in k3s_label.stdout"
+      # A worker that just joined may not be registered yet
+      until: k3s_label is succeeded
+      retries: 12
+      delay: 10

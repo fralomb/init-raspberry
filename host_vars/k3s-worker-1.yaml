@@ -1,0 +1,7 @@
+---
+# Raspberry Pi 5 (8 GB) with a USB SSD: runs the local AI models (apps/ai).
+ssd_storage: true
+
+# Applied by the last play in playbook.yaml; apps/ai schedules Ollama on it.
+k3s_node_labels:
+  homelab/ai: "true"

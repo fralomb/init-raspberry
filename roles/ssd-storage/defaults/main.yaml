@@ -1,0 +1,9 @@
+---
+# Filesystem label of the SSD partition (set with `mkfs.ext4 -L ssd`)
+ssd_label: ssd
+ssd_fstype: ext4
+ssd_mount: /mnt/ssd
+
+# Directories created on the SSD once it is mounted
+ssd_directories:
+  - ollama

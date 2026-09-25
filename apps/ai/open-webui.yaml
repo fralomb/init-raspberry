@@ -1,0 +1,93 @@
+---
+# Open WebUI: chat UI and OpenAI-compatible API (per-user API keys) in front of Ollama,
+# at https://ai.homelab.francesco-lombardo.it. Kept off the AI node to leave it the memory.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: open-webui
+  namespace: gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://helm.openwebui.com/
+    chart: open-webui
+    targetRevision: 16.6.0
+    helm:
+      releaseName: open-webui
+      valuesObject:
+        # Ollama is the separate `ollama` Application
+        ollama:
+          enabled: false
+        ollamaUrls:
+          - http://ollama.ai.svc.cluster.local:11434
+        # No OpenAI upstream, no Pipelines/Tika, in-memory websocket manager (single
+        # replica): no extra pods on the Pi.
+        enableOpenaiApi: false
+        pipelines:
+          enabled: false
+        tika:
+          enabled: false
+        websocket:
+          enabled: false
+          redis:
+            enabled: false
+        workload:
+          kind: StatefulSet
+        persistence:
+          enabled: true
+          size: 2Gi
+        affinity:
+          nodeAffinity:
+            requiredDuringSchedulingIgnoredDuringExecution:
+              nodeSelectorTerms:
+                - matchExpressions:
+                    - key: homelab/ai
+                      operator: NotIn
+                      values: ["true"]
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            memory: 1536Mi
+        extraEnvVars:
+          # Embeddings for documents/RAG through Ollama, instead of downloading a
+          # sentence-transformers model into the pod
+          - name: RAG_EMBEDDING_ENGINE
+            value: ollama
+          - name: RAG_EMBEDDING_MODEL
+            value: nomic-embed-text
+          # Signs the login sessions. Without the (optional) Secret a random key is
+          # generated at every start and everyone gets logged out on restart.
+          - name: WEBUI_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: open-webui-secret
+                key: secret-key
+                optional: true
+        extraResources:
+          - apiVersion: traefik.io/v1alpha1
+            kind: IngressRoute
+            metadata:
+              name: open-webui
+              namespace: ai
+            spec:
+              entryPoints:
+                - websecure
+              routes:
+                - kind: Rule
+                  match: Host(`ai.homelab.francesco-lombardo.it`)
+                  services:
+                    - name: open-webui
+                      port: 80
+              # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
+              tls: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true

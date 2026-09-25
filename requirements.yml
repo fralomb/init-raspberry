@@ -1,0 +1,5 @@
+---
+# Bundled with the full `ansible` package; needed explicitly with ansible-core:
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: ansible.posix

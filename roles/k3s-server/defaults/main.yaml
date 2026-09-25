@@ -20,6 +20,8 @@ k3s_addons:
   # Needs the cert-manager CRDs: k3s retries it until the chart above installs them.
   - k3s/cert-manager/cloudflare-issuer.yaml
   - k3s/argocd/argocd-chart.yaml
+  # Needs the argoproj.io CRDs: k3s retries it until the chart above installs them.
+  - k3s/argocd/argocd-apps.yaml
   - k3s/tailscale/tailscale-operator-chart.yaml
   # Needs the tailscale.com CRDs: k3s retries it until the operator chart installs them.
   - k3s/tailscale/subnet-router.yaml

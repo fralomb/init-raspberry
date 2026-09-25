@@ -20,16 +20,8 @@ spec:
       params:
         # TLS is terminated by Traefik
         server.insecure: true
-      # credentialTemplates:
-      #   github-app-creds:
-      #     url: https://github.com/argoproj
-      #     githubAppID: 1
-      #     githubAppInstallationID: 2
-      #     githubAppEnterpriseBaseUrl: https://ghe.example.com/api/v3
-      #     githubAppPrivateKey: |
-      #       -----BEGIN OPENSSH PRIVATE KEY-----
-      #       ...
-      #       -----END OPENSSH PRIVATE KEY-----
+      # Repository credentials are not set here (they would be committed): the
+      # GitHub App Secret is created by hand in the gitops namespace, see README.
     # Shipped with the release rather than as a separate manifest, so it is only
     # applied once the gitops namespace exists.
     extraObjects:

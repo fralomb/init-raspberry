@@ -145,6 +145,28 @@ Initial `admin` password:
 kubectl -n gitops get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
 ```
 
+#### Applications (app of apps)
+[k3s/argocd/argocd-apps.yaml](k3s/argocd/argocd-apps.yaml), also in `k3s_addons`, is the root
+`homelab-apps` Application: Argo CD syncs every manifest under [apps/](apps) (recursively, with
+prune and self-heal), and those are the Applications of the homelab workloads. Add a workload by
+committing its manifests there, not by editing `k3s_addons`.
+
+The repo is private, so Argo CD reads it through a GitHub App. Create the App (permission
+*Contents: read-only*), install it on this repository and generate a private key (a `.pem`,
+`-----BEGIN RSA PRIVATE KEY-----`). Then store it in the `gitops` namespace, the only one Argo CD
+reads repository Secrets from, labelled as a repository:
+```
+kubectl -n gitops create secret generic repo-init-raspberry \
+  --from-literal=type=git \
+  --from-literal=url=https://github.com/fralomb/init-raspberry \
+  --from-literal=githubAppID=<app-id> \
+  --from-literal=githubAppInstallationID=<installation-id> \
+  --from-file=githubAppPrivateKey=./argocd-app.private-key.pem
+kubectl -n gitops label secret repo-init-raspberry argocd.argoproj.io/secret-type=repository
+```
+The installation ID is the number at the end of the installation's settings URL. Check with
+`kubectl -n gitops get applications`.
+
 ### Traefik
 k3s ships Traefik v3 as a packaged component. [k3s/traefik/traefik-config.yaml](k3s/traefik/traefik-config.yaml)
 is a `HelmChartConfig` that overrides its values (HTTP→HTTPS redirect, default TLSStore,
@@ -247,6 +269,83 @@ whole home network.
   [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml).
 - Add back an `ssh` section only if you use Tailscale SSH; plain SSH through the subnet route uses
   the `tcp:22` grant.
+
+## Local AI models
+[Ollama](https://ollama.com) serves the models and [Open WebUI](https://docs.openwebui.com) is
+the chat UI and API in front of it, both deployed by Argo CD from [apps/ai/](apps/ai):
+
+| | Node | Exposed |
+|---|---|---|
+| Ollama ([apps/ai/ollama.yaml](apps/ai/ollama.yaml)) | Pi 5 (8 GB), label `homelab/ai=true` | no: ClusterIP only, it has no authentication |
+| Open WebUI ([apps/ai/open-webui.yaml](apps/ai/open-webui.yaml)) | any other node | `https://ai.homelab.francesco-lombardo.it` |
+
+Inference runs on the CPU (llama.cpp), so stick to small quantized models. On the Pi 5,
+`qwen3:1.7b`/`gemma3:1b` answer quickly and `qwen3:4b`/`gemma3:4b`/`llama3.2:3b` are better
+but slower (a few tokens/s); 7–8B models fit but crawl. Ollama keeps one model in memory at a
+time (`OLLAMA_MAX_LOADED_MODELS=1`) and is capped at 6 GiB, so a model too large is OOM-killed
+instead of starving the node.
+
+### USB SSD for the model weights
+Models are GBs each: they live on a USB SSD on the Pi 5, not on the SD card. The disk is
+formatted **ext4** (the container needs POSIX ownership; exFAT/NTFS don't have it). Formatting is
+a one-time manual step since it wipes the disk:
+```bash
+lsblk -f                              # find the SSD, e.g. /dev/sda
+sudo wipefs -a /dev/sda
+sudo parted -s /dev/sda mklabel gpt mkpart ssd ext4 0% 100%
+sudo mkfs.ext4 -L ssd /dev/sda1
+```
+The `ssd-storage` role mounts it for hosts with `ssd_storage: true`
+([host_vars/k3s-worker-1.yaml](host_vars/k3s-worker-1.yaml)): `LABEL=ssd` on `/mnt/ssd` via
+fstab, with `nofail` so the Pi still boots without the disk, and creates `/mnt/ssd/ollama`. If
+the disk is already mounted elsewhere or has another label, set `ssd_mount`/`ssd_label` there
+(defaults in [roles/ssd-storage/defaults/main.yaml](roles/ssd-storage/defaults/main.yaml)).
+It uses the `ansible.posix` collection, part of the full `ansible` package; with `ansible-core`
+only, run `ansible-galaxy collection install -r requirements.yml`.
+
+[apps/ai/storage.yaml](apps/ai/storage.yaml) turns that directory into a `local` PersistentVolume
+bound to the `homelab/ai=true` node, which also pins Ollama there.
+
+### Node label
+`k3s_node_labels` in a host's vars is applied by the last play of `playbook.yaml` (the node name
+is the inventory hostname, which must match the Pi's hostname). To set it without the playbook:
+```
+kubectl label node k3s-worker-1 homelab/ai=true
+```
+
+### Models
+The models in `ollama.models.pull` are downloaded at pod start when missing from the SSD
+(`nomic-embed-text` is the embedding model Open WebUI uses for documents). Pull others through
+the UI (Admin settings → Models) or:
+```
+kubectl -n ai exec deploy/ollama -- ollama pull gemma3:4b
+kubectl -n ai exec deploy/ollama -- ollama list
+```
+
+### Open WebUI
+- The first account created on `https://ai.homelab.francesco-lombardo.it` becomes the admin.
+  Right after, disable sign-ups in Admin settings → General (stored in its database, not in
+  the chart values) and add users from there.
+- Optional, to keep users logged in across restarts: a fixed session key (otherwise a random
+  one is generated at every start):
+  ```
+  kubectl -n ai create secret generic open-webui-secret --from-literal=secret-key=$(openssl rand -hex 32)
+  kubectl -n ai rollout restart statefulset open-webui
+  ```
+- OpenAI-compatible API for scripts, editors and agents: create a key in Settings → Account → API
+  keys, then use `https://ai.homelab.francesco-lombardo.it/api` as base URL:
+  ```
+  curl https://ai.homelab.francesco-lombardo.it/api/chat/completions \
+    -H "Authorization: Bearer $OPENWEBUI_API_KEY" -H 'Content-Type: application/json' \
+    -d '{"model": "qwen3:1.7b", "messages": [{"role": "user", "content": "hello"}]}'
+  ```
+
+Check the deployment:
+```
+kubectl -n gitops get applications
+kubectl -n ai get pods,pvc -o wide
+kubectl -n ai logs deploy/ollama
+```
 
 ## Extras
 

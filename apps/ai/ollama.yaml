@@ -1,0 +1,61 @@
+---
+# Ollama (llama.cpp, CPU only) on the Pi 5. No authentication: ClusterIP only, reached
+# by Open WebUI in-cluster. Clients outside the cluster go through Open WebUI's API.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ollama
+  namespace: gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://otwld.github.io/ollama-helm/
+    chart: ollama
+    targetRevision: 1.83.0
+    helm:
+      releaseName: ollama
+      valuesObject:
+        ollama:
+          gpu:
+            enabled: false
+          models:
+            # Pulled at pod start when missing from the SSD. Q4 models that fit the
+            # Pi 5 memory: ~2.5 GB (4b) and ~1.4 GB (1.7b). nomic-embed-text is the
+            # embedding model Open WebUI uses for documents (RAG).
+            pull:
+              - qwen3:4b
+              - qwen3:1.7b
+              - nomic-embed-text
+        extraEnv:
+          # One request, one model in memory at a time: the Pi has 8 GB in total
+          - name: OLLAMA_NUM_PARALLEL
+            value: "1"
+          - name: OLLAMA_MAX_LOADED_MODELS
+            value: "1"
+          - name: OLLAMA_KEEP_ALIVE
+            value: 30m
+        persistentVolume:
+          enabled: true
+          storageClass: local-ssd
+          volumeName: ollama-models
+          size: 60Gi
+        nodeSelector:
+          homelab/ai: "true"
+        resources:
+          requests:
+            cpu: "1"
+            memory: 3Gi
+          # A model too large for the node gets OOM-killed instead of starving it
+          limits:
+            memory: 6Gi
+        tests:
+          enabled: false
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
