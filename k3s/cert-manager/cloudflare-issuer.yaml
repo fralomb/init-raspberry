@@ -6,12 +6,13 @@ metadata:
   namespace: kube-system
 spec:
   acme:
-    # server: https://acme-v02.api.letsencrypt.org/directory # prod env
-    server: https://acme-staging-v02.api.letsencrypt.org/directory # staging env
+    server: https://acme-v02.api.letsencrypt.org/directory # prod env
+    # server: https://acme-staging-v02.api.letsencrypt.org/directory # staging env: use it (and its
+    # own key secret) to test changes without hitting prod rate limits
     email: fra.lombardo92@gmail.com
     # Name of a secret used to store the ACME account private key
     privateKeySecretRef:
-      name: cloudflare-letsencrypt-key
+      name: cloudflare-letsencrypt-prod-key
     solvers:
       - selector: {}
         dns01:
