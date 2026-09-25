@@ -16,7 +16,8 @@ spec:
       - selector: {}
         dns01:
           cloudflare:
-            email: fra.lombardo92@gmail.com
+            # No `email` with an API token: cert-manager would also send X-Auth-Email,
+            # which Cloudflare can reject alongside the Bearer token.
             apiTokenSecretRef:
               name: cloudflare
               key: api-token
