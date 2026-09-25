@@ -148,7 +148,7 @@ kubectl -n gitops get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 ### Traefik
 k3s ships Traefik v3 as a packaged component. [k3s/traefik/traefik-config.yaml](k3s/traefik/traefik-config.yaml)
 is a `HelmChartConfig` that overrides its values (HTTP→HTTPS redirect, default TLSStore,
-dashboard, access logs). It is installed through `k3s_addons` like Argo CD. The values target the
+dashboard disabled, access logs). It is installed through `k3s_addons` like Argo CD. The values target the
 Traefik chart version bundled with the pinned `k3s_version` (chart 40.1.x for `v1.36.4+k3s1`):
 re-check them against that chart's `values.yaml` when bumping k3s.
 
@@ -231,7 +231,7 @@ whole home network.
     {
       "src": "fra.lombardo92@gmail.com",
       "accept": ["192.168.1.16:443", "192.168.1.15:22"],
-      // Home router UI and the unauthenticated Traefik dashboard must stay unreachable
+      // Home router UI and Traefik's internal entrypoint (8080) must stay unreachable
       "deny": ["192.168.1.1:443", "192.168.1.16:8080"]
     }
   ]
