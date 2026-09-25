@@ -36,6 +36,13 @@
     state: started
     enabled: true
 
+- name: Check AddOns file names are valid Kubernetes object names
+  assert:
+    that: (item | basename).split('.')[0] is match('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')
+    fail_msg: "k3s would never apply {{ item }}: its Addon name must use only lowercase letters, digits and '-'"
+    quiet: true
+  loop: "{{ k3s_addons }}"
+
 - name: Install auto-deploying AddOns manifests
   copy:
     src: "{{ playbook_dir }}/{{ item }}"

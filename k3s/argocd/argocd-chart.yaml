@@ -56,5 +56,5 @@ spec:
                 - name: argocd-server
                   port: 80
                   scheme: h2c
-          # Served by the default TLSStore certificate (see k3s/traefik/traefik_config.yaml)
+          # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
           tls: {}
