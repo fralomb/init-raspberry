@@ -119,36 +119,134 @@ Change the destination and the name with `k3s_kubeconfig_dest` and `k3s_context_
 
 ## K3s dependencies
 ### Argocd
-TODO
+Installed by the `k3s-server` role through the k3s
+[auto-deploying AddOns](https://docs.k3s.io/installation/packaged-components#auto-deploying-manifests-addons):
+every file listed in `k3s_addons` ([roles/k3s-server/defaults/main.yaml](roles/k3s-server/defaults/main.yaml))
+is copied to `/var/lib/rancher/k3s/server/manifests/`, and k3s applies it on start and on
+every change. [k3s/argocd/argocd-chart.yaml](k3s/argocd/argocd-chart.yaml) is a `HelmChart`
+that installs Argo CD in the `gitops` namespace, plus a Traefik `IngressRoute` exposing the
+dashboard (and the gRPC API for the `argocd` CLI) at `https://argocd.homelab.francesco-lombardo.it`.
+
+To change the Argo CD config, edit the manifest and re-run the playbook. Check the install with:
+```
+kubectl -n kube-system get helmchart argocd
+kubectl -n kube-system logs job/helm-install-argocd
+kubectl -n gitops get pods,ingressroute
+```
+
+Prerequisites:
+- `argocd.homelab.francesco-lombardo.it` resolves to the master node (see [Tailscale](#tailscale-private-access)).
+- TLS uses Traefik's default TLSStore: the `*.homelab.francesco-lombardo.it` name is part of the
+  `francesco-lombardo-it-cert` certificate in [k3s/cert-manager/cloudflare-issuer.yaml](k3s/cert-manager/cloudflare-issuer.yaml).
+  Without it, Traefik serves its self-signed certificate.
+
+Initial `admin` password:
+```
+kubectl -n gitops get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
+```
 
 ### Traefik
-TODO
+k3s ships Traefik v3 as a packaged component. [k3s/traefik/traefik-config.yaml](k3s/traefik/traefik-config.yaml)
+is a `HelmChartConfig` that overrides its values (HTTP→HTTPS redirect, default TLSStore,
+dashboard disabled, access logs). It is installed through `k3s_addons` like Argo CD. The values target the
+Traefik chart version bundled with the pinned `k3s_version` (chart 40.1.x for `v1.36.4+k3s1`):
+re-check them against that chart's `values.yaml` when bumping k3s.
 
 ### Cert-Manager
 [How to configure](https://github.com/traefik/traefik-helm-chart/blob/master/EXAMPLES.md#provide-default-certificate-with-cert-manager-and-cloudflare-dns) Traefik with Cert-Manger for signed certificates.
 
-Install `Cert-Manager` via [Helm chart](https://cert-manager.io/docs/installation/helm/).
+`Cert-Manager` is installed via its [Helm chart](https://cert-manager.io/docs/installation/helm/)
+([k3s/cert-manager/cert-manager-chart.yaml](k3s/cert-manager/cert-manager-chart.yaml)), and the
+Cloudflare DNS-01 `Issuer` plus the wildcard `Certificate`s live in
+[k3s/cert-manager/cloudflare-issuer.yaml](k3s/cert-manager/cloudflare-issuer.yaml). Both are in
+`k3s_addons`; k3s retries the issuer file until the chart has installed the cert-manager CRDs.
 
+Create a secret containing the API token of Cloudflare in the `kube-system` namespace (where the
+`Issuer` and Traefik live):
+```
+kubectl create secret generic cloudflare --from-literal=api-token=XXX --type=Opaque --namespace kube-system
+```
 
-Create a secret containing the API token of Cloudflare in the `traefik` namespace:
-```
-kubectl create secret generic cloudflare --from-literal=api-token=XXX --type=Opaque --namespace traefik
+### Tailscale (private access)
+Nothing in the homelab is exposed to the internet: no router port forwarding, no DDNS. Remote
+access goes through [Tailscale](https://tailscale.com/kb/1236/kubernetes-operator), running in the
+cluster:
+
+- [k3s/tailscale/tailscale-operator-chart.yaml](k3s/tailscale/tailscale-operator-chart.yaml) installs
+  the Tailscale Kubernetes operator in the `tailscale` namespace.
+- [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml) is a `Connector` that makes the
+  operator run a subnet router advertising `192.168.1.0/24`, so tailnet devices reach the LAN (and
+  Traefik on the master) as if they were at home. What tailnet users can actually reach through it
+  is decided by the [tailnet policy](#tailnet-policy).
+
+DNS is a single static Cloudflare record, **DNS only** (grey cloud): `*.homelab.francesco-lombardo.it`
+`A` → `192.168.1.16` (the master's LAN IP). The same name works at home without Tailscale and remotely
+through it; certificates keep working since the DNS-01 challenge needs no inbound traffic. If a
+name does not resolve at home, the router's DNS rebinding protection is dropping answers with a
+private IP: allow the domain there.
+
+One-time setup in the [Tailscale admin console](https://login.tailscale.com/admin):
+
+1. Access controls: apply the [tailnet policy](#tailnet-policy) below.
+2. Settings → Trust credentials: create an OAuth client with the scopes listed in the
+   [operator docs](https://tailscale.com/kb/1236/kubernetes-operator#prerequisites) (`Devices Core`,
+   `Auth Keys`, `Services` write) and tag `tag:k8s-operator`.
+3. Store it in the cluster (the operator pod waits for this Secret):
+   ```
+   kubectl create namespace tailscale
+   kubectl -n tailscale create secret generic operator-oauth \
+     --from-literal=client_id=XXX --from-literal=client_secret=YYY
+   ```
+
+Check with `kubectl get connector` and `kubectl -n tailscale get pods`; the `homelab-subnet-router`
+device then shows up in the admin console with the route approved.
+
+#### Tailnet policy
+Paste into Access controls → JSON editor, replacing the default allow-all policy. The subnet
+router enforces these grants on routed traffic, so the tailnet only reaches the homelab, not the
+whole home network.
+
+```jsonc
+{
+  // The operator tags itself tag:k8s-operator and the devices it creates tag:k8s.
+  "tagOwners": {
+    "tag:k8s-operator": [],
+    "tag:k8s": ["tag:k8s-operator"]
+  },
+  // Approve the Connector's route without a manual click.
+  "autoApprovers": {
+    "routes": { "192.168.1.0/24": ["tag:k8s"] }
+  },
+  "grants": [
+    // Your own devices can talk to each other
+    { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"] },
+    // Homelab services through Traefik on the master
+    { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:443", "tcp:80"] },
+    // SSH to the k3s nodes (master + worker) and the Kubernetes API
+    { "src": ["autogroup:member"], "dst": ["192.168.1.15/32", "192.168.1.16/32"], "ip": ["tcp:22"] },
+    { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:6443"] }
+  ],
+  // Checked on every save: a failing test rejects the change and the old policy stays active.
+  "tests": [
+    {
+      "src": "fra.lombardo92@gmail.com",
+      "accept": ["192.168.1.16:443", "192.168.1.15:22"],
+      // Home router UI and Traefik's internal entrypoint (8080) must stay unreachable
+      "deny": ["192.168.1.1:443", "192.168.1.16:8080"]
+    }
+  ]
+}
 ```
 
-### Cloudflare DDNS
-Allows to dynamically change the IP address of the domains defined in Cloudflare using an API Token.
-Based on this [repo](https://github.com/timothymiller/cloudflare-ddns).
-
-At the moment, it is using a secret injected in the deployment, but it needs to be re-thinked using some kind of Secrets management tool.
-
-In order to generate the configuration use `envsubst` to substitute the cloudflare secrets:
-```
-CF_API_TOKEN="XXX" CF_ZONE_ID_1="YYY" CF_ZONE_ID_2="ZZZ" envsubst < k3s/ddns/config.json > config.json
-```
-Then, create the secret using the file:
-```
-kubectl create secret generic config-cloudflare-ddns --from-file=config.json -n ddns
-```
+- `tagOwners` and `autoApprovers` grant no access; only `grants` does. Tagged devices (operator,
+  subnet router) get no grant, so they cannot open connections towards your devices.
+- `tests` does not change access: each entry asserts that traffic from `src` is allowed to every
+  `accept` destination and blocked for every `deny` one (`host:port`). Update it together with
+  the grants, and change `src` if your Tailscale login differs.
+- Keep the node IPs in sync with [inventory/hosts](inventory/hosts) and the route with
+  [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml).
+- Add back an `ssh` section only if you use Tailscale SSH; plain SSH through the subnet route uses
+  the `tcp:22` grant.
 
 ## Extras
 

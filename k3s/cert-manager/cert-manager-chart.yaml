@@ -9,12 +9,14 @@ spec:
   chart: cert-manager
   targetNamespace: cert-manager
   createNamespace: true
-  version: 1.14.5
+  version: v1.21.2
   valuesContent: |-
-    extraArgs:
-      - --dns01-recursive-nameservers-only
-      - --dns01-recursive-nameservers=8.8.8.8:53,1.1.1.1:53
-    installCRDs: true
+    # Check the DNS-01 TXT record against public resolvers, not the LAN/cluster DNS
+    dns01RecursiveNameservers: "8.8.8.8:53,1.1.1.1:53"
+    dns01RecursiveNameserversOnly: true
+    crds:
+      enabled: true
+      keep: true
     prometheus:
       enabled: false
 

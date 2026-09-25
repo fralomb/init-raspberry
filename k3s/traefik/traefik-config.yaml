@@ -1,0 +1,50 @@
+---
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    tlsStore:
+      default:
+        certificates:
+        - secretName: francesco-lombardo-it-tls
+        defaultCertificate:
+          secretName: francesco-lombardo-it-tls
+    logs:
+      general:
+        level: INFO
+      access:
+        enabled: true
+        filters:
+          statuscodes: "200,300-302"
+          retryattempts: true
+          minduration: 10ms
+
+    ports:
+      web:
+        http:
+          redirections:
+            entryPoint:
+              to: websecure
+              scheme: https
+              permanent: true
+    # No dashboard: the chart then creates no dashboard IngressRoute, and the
+    # traefik entrypoint (8080, health checks) stays unexposed as by default.
+    api:
+      dashboard: false
+    extraObjects:
+    - apiVersion: traefik.io/v1alpha1
+      kind: Middleware
+      metadata:
+        name: redirect-non-www-to-www
+      spec:
+        redirectRegex:
+          permanent: true
+          regex: "^(https?)://(?:www\\.)?(.+)$"
+          replacement: "${1}://www.${2}"
+    providers:
+      kubernetesCRD:
+        enabled: true
+        allowCrossNamespace: true

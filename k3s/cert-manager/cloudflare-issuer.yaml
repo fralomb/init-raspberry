@@ -1,0 +1,37 @@
+---
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: cloudflare-letsencrypt
+  namespace: kube-system
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory # prod env
+    # server: https://acme-staging-v02.api.letsencrypt.org/directory # staging env: use it (and its
+    # own key secret) to test changes without hitting prod rate limits
+    email: fra.lombardo92@gmail.com
+    # Name of a secret used to store the ACME account private key
+    privateKeySecretRef:
+      name: cloudflare-letsencrypt-prod-key
+    solvers:
+      - selector: {}
+        dns01:
+          cloudflare:
+            # No `email` with an API token: cert-manager would also send X-Auth-Email,
+            # which Cloudflare can reject alongside the Bearer token.
+            apiTokenSecretRef:
+              name: cloudflare
+              key: api-token
+---
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: francesco-lombardo-it-cert
+  namespace: kube-system
+spec:
+  secretName: francesco-lombardo-it-tls
+  dnsNames:
+    - "*.homelab.francesco-lombardo.it"
+  issuerRef:
+    name: cloudflare-letsencrypt
+    kind: Issuer

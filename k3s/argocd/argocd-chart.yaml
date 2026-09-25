@@ -12,12 +12,13 @@ spec:
   version: 6.7.18
   valuesContent: |-
     global:
-      domain: argocd.internal.francesco-lombardo.it
+      domain: argocd.homelab.francesco-lombardo.it
       logging:
         format: json
         level: info
     configs:
       params:
+        # TLS is terminated by Traefik
         server.insecure: true
       # credentialTemplates:
       #   github-app-creds:
@@ -29,27 +30,31 @@ spec:
       #       -----BEGIN OPENSSH PRIVATE KEY-----
       #       ...
       #       -----END OPENSSH PRIVATE KEY-----
----
-apiVersion: traefik.io/v1alpha1
-kind: IngressRoute
-metadata:
-  name: argo-ingress
-  namespace: gitops
-spec:
-  entryPoints:
-    - websecure
-  routes:
-  - match: Host(`argocd.internal.francesco-lombardo.it`)
-    kind: Rule
-    services:
-    - name: argocd-server
-      port: 80
-  - kind: Rule
-    match: Host(`argocd.internal.francesco-lombardo.it`) && Headers(`Content-Type`, `application/grpc`)
-    priority: 11
-    services:
-    - name: argocd-server
-      port: 80
-      scheme: h2c
-  tls:
-    secretName: argocd-certificate
+    # Shipped with the release rather than as a separate manifest, so it is only
+    # applied once the gitops namespace exists.
+    extraObjects:
+      - apiVersion: traefik.io/v1alpha1
+        kind: IngressRoute
+        metadata:
+          name: argocd-server
+          namespace: gitops
+        spec:
+          entryPoints:
+            - websecure
+          routes:
+            - kind: Rule
+              match: Host(`argocd.homelab.francesco-lombardo.it`)
+              priority: 10
+              services:
+                - name: argocd-server
+                  port: 80
+            # argocd CLI (gRPC) without --grpc-web
+            - kind: Rule
+              match: Host(`argocd.homelab.francesco-lombardo.it`) && Header(`Content-Type`, `application/grpc`)
+              priority: 11
+              services:
+                - name: argocd-server
+                  port: 80
+                  scheme: h2c
+          # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
+          tls: {}
