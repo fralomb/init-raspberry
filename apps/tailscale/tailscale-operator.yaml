@@ -1,0 +1,36 @@
+---
+# Tailscale Kubernetes operator: the tailnet's way into the homelab (see README).
+# oauth.* left empty on purpose: the operator mounts the `operator-oauth` Secret
+# (client_id, client_secret), synced from OpenBao by operator-oauth-secret.yaml.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tailscale-operator
+  namespace: gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://pkgs.tailscale.com/helmcharts
+    chart: tailscale-operator
+    targetRevision: 1.102.4
+    helm:
+      releaseName: tailscale-operator
+      valuesObject:
+        operatorConfig:
+          hostname: homelab-k8s-operator
+          image:
+            tag: v1.102.4
+        proxyConfig:
+          image:
+            tag: v1.102.4
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: tailscale
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

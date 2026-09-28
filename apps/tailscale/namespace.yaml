@@ -1,0 +1,9 @@
+---
+# Created by the root app ahead of everything else in apps/tailscale, so the
+# ExternalSecret below can be applied in the same sync as the operator.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tailscale
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"

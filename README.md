@@ -159,15 +159,17 @@ kubectl -n openbao exec -ti openbao-0 -- bao operator unseal
 # 3. KV engine, ESO policy and Kubernetes auth role
 BAO_TOKEN=<root token> k3s/openbao/configure.sh
 
-# 4. Secrets (paths and keys in the table above), e.g. from the UI or with the CLI:
-kubectl -n openbao exec -ti openbao-0 -- sh -c 'BAO_TOKEN=<root token> bao kv put secret/cloudflare api-token=XXX'
+# 4. Secrets (paths and keys in the table above) with the local CLI (brew install openbao)
+kubectl -n openbao port-forward svc/openbao 8200 &
+export BAO_ADDR=http://127.0.0.1:8200
+bao login                                   # root token
+bao kv put secret/cloudflare api-token=XXX
 ```
-The UI (`https://bao.homelab.francesco-lombardo.it`, login with the root token) is the easiest
-way to enter multi-line values like the GitHub App private key. It needs the Cloudflare
-certificate; before that, use `kubectl -n openbao port-forward svc/openbao-ui 8200` and
-`http://localhost:8200`. The `bao kv put` examples in the sections below assume a shell where
-`bao` reaches OpenBao, e.g. `export BAO_ADDR=http://localhost:8200 BAO_TOKEN=...` with the
-port-forward and a local `bao` binary.
+The `bao kv put` examples in the sections below assume that shell. Once the certificate is
+issued, the UI at `https://bao.homelab.francesco-lombardo.it` works too.
+
+The whole sequence, from wiping the nodes to testing rotation, sealing and backups, is in
+[docs/fresh-install.md](docs/fresh-install.md).
 
 Secrets created earlier with `kubectl create secret` are taken over by their `ExternalSecret`
 (same name) at the first sync, so migrating needs no downtime.
@@ -266,11 +268,11 @@ bao kv put secret/cloudflare api-token=XXX
 ### Tailscale (private access)
 Nothing in the homelab is exposed to the internet: no router port forwarding, no DDNS. Remote
 access goes through [Tailscale](https://tailscale.com/kb/1236/kubernetes-operator), running in the
-cluster:
+cluster, deployed by Argo CD from [apps/tailscale/](apps/tailscale):
 
-- [k3s/tailscale/tailscale-operator-chart.yaml](k3s/tailscale/tailscale-operator-chart.yaml) installs
-  the Tailscale Kubernetes operator in the `tailscale` namespace.
-- [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml) is a `Connector` that makes the
+- [apps/tailscale/tailscale-operator.yaml](apps/tailscale/tailscale-operator.yaml) is the Application
+  installing the Tailscale Kubernetes operator chart in the `tailscale` namespace.
+- [apps/tailscale/subnet-router.yaml](apps/tailscale/subnet-router.yaml) is a `Connector` that makes the
   operator run a subnet router advertising `192.168.1.0/24`, so tailnet devices reach the LAN (and
   Traefik on the master) as if they were at home. What tailnet users can actually reach through it
   is decided by the [tailnet policy](#tailnet-policy).
@@ -288,7 +290,7 @@ One-time setup in the [Tailscale admin console](https://login.tailscale.com/admi
    [operator docs](https://tailscale.com/kb/1236/kubernetes-operator#prerequisites) (`Devices Core`,
    `Auth Keys`, `Services` write) and tag `tag:k8s-operator`.
 3. Store it in [OpenBao](#secrets-openbao--external-secrets). The operator pod waits for the
-   `operator-oauth` Secret, synced by [k3s/tailscale/operator-oauth-secret.yaml](k3s/tailscale/operator-oauth-secret.yaml):
+   `operator-oauth` Secret, synced by [apps/tailscale/operator-oauth-secret.yaml](apps/tailscale/operator-oauth-secret.yaml):
    ```
    bao kv put secret/tailscale/operator-oauth client_id=XXX client_secret=YYY
    ```
@@ -339,7 +341,7 @@ whole home network.
   `accept` destination and blocked for every `deny` one (`host:port`). Update it together with
   the grants, and change `src` if your Tailscale login differs.
 - Keep the node IPs in sync with [inventory/hosts](inventory/hosts) and the route with
-  [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml).
+  [apps/tailscale/subnet-router.yaml](apps/tailscale/subnet-router.yaml).
 - Add back an `ssh` section only if you use Tailscale SSH; plain SSH through the subnet route uses
   the `tcp:22` grant.
 

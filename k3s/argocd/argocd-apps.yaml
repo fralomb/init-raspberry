@@ -23,3 +23,11 @@ spec:
     automated:
       prune: true
       selfHeal: true
+    # Resources whose CRDs come from a child Application (e.g. the Tailscale
+    # Connector) fail until that app has synced: keep retrying.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m
