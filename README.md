@@ -118,6 +118,75 @@ Change the destination and the name with `k3s_kubeconfig_dest` and `k3s_context_
 - `restorecon: command not found` → `sudo apt-get install policycoreutils`.
 
 ## K3s dependencies
+### Secrets (OpenBao + External Secrets)
+Secrets are kept in [OpenBao](https://openbao.org) (the open-source fork of HashiCorp Vault) and
+synced into Kubernetes Secrets by the [External Secrets Operator](https://external-secrets.io)
+(ESO). Nothing secret is committed and there are no `kubectl create secret` steps. Both are the
+first entries of `k3s_addons`, since every other component waits for a Secret from them:
+
+- [k3s/openbao/openbao-chart.yaml](k3s/openbao/openbao-chart.yaml): OpenBao, single node with
+  integrated Raft storage, UI at `https://bao.homelab.francesco-lombardo.it`.
+- [k3s/external-secrets/external-secrets-chart.yaml](k3s/external-secrets/external-secrets-chart.yaml): ESO.
+- [k3s/external-secrets/openbao-secret-store.yaml](k3s/external-secrets/openbao-secret-store.yaml): the
+  `openbao` `ClusterSecretStore`. ESO logs in with its own ServiceAccount through OpenBao's
+  Kubernetes auth, so there is no token to store.
+- One `ExternalSecret` next to each consumer (`*-secret.yaml`), reading a path under `secret/`.
+
+| OpenBao path | Keys | Kubernetes Secret |
+|---|---|---|
+| `secret/cloudflare` | `api-token` | `kube-system/cloudflare` |
+| `secret/tailscale/operator-oauth` | `client_id`, `client_secret` | `tailscale/operator-oauth` |
+| `secret/argocd/repo-init-raspberry` | `githubAppID`, `githubAppInstallationID`, `githubAppPrivateKey` | `gitops/repo-init-raspberry` |
+| `secret/open-webui` | `secret-key`, `admin-email`, `admin-password` (optional) | `ai/open-webui-secret` |
+
+#### Sealing
+OpenBao encrypts its storage with a root key that never touches the disk. At init the key is
+split into 5 **unseal keys**, any 3 of which rebuild it. After every restart (pod, node reboot,
+upgrade) OpenBao starts **sealed**: it answers nothing until 3 unseal keys are entered. The
+already synced Kubernetes Secrets are kept meanwhile, so running apps are not affected: only
+new or changed secrets wait for the unseal.
+
+#### First setup
+Once the playbook has run and the `openbao-0` pod is `Running` (not Ready: it is sealed):
+```bash
+# 1. Initialise: prints 5 unseal keys and the root token, shown only this once.
+#    Store them in your password manager, never in this repo.
+kubectl -n openbao exec -ti openbao-0 -- bao operator init
+
+# 2. Unseal: run 3 times, each with a different unseal key (prompted, not echoed)
+kubectl -n openbao exec -ti openbao-0 -- bao operator unseal
+
+# 3. KV engine, ESO policy and Kubernetes auth role
+BAO_TOKEN=<root token> k3s/openbao/configure.sh
+
+# 4. Secrets (paths and keys in the table above), e.g. from the UI or with the CLI:
+kubectl -n openbao exec -ti openbao-0 -- sh -c 'BAO_TOKEN=<root token> bao kv put secret/cloudflare api-token=XXX'
+```
+The UI (`https://bao.homelab.francesco-lombardo.it`, login with the root token) is the easiest
+way to enter multi-line values like the GitHub App private key. It needs the Cloudflare
+certificate; before that, use `kubectl -n openbao port-forward svc/openbao-ui 8200` and
+`http://localhost:8200`. The `bao kv put` examples in the sections below assume a shell where
+`bao` reaches OpenBao, e.g. `export BAO_ADDR=http://localhost:8200 BAO_TOKEN=...` with the
+port-forward and a local `bao` binary.
+
+Secrets created earlier with `kubectl create secret` are taken over by their `ExternalSecret`
+(same name) at the first sync, so migrating needs no downtime.
+
+After a restart only step 2 is needed. Check with:
+```bash
+kubectl -n openbao exec openbao-0 -- bao status        # Sealed: false
+kubectl get clustersecretstore openbao                 # STATUS Valid
+kubectl get externalsecrets -A                         # STATUS SecretSynced
+```
+
+#### Backups
+Raft snapshots hold every secret, encrypted with the root key, so they are only usable with the
+unseal keys:
+```bash
+kubectl -n openbao exec openbao-0 -- sh -c 'BAO_TOKEN=<root token> bao operator raft snapshot save /tmp/bao.snap'
+kubectl -n openbao cp openbao-0:/tmp/bao.snap ./bao-$(date +%F).snap
+```
+
 ### Argocd
 Installed by the `k3s-server` role through the k3s
 [auto-deploying AddOns](https://docs.k3s.io/installation/packaged-components#auto-deploying-manifests-addons):
@@ -153,17 +222,15 @@ committing its manifests there, not by editing `k3s_addons`.
 
 The repo is private, so Argo CD reads it through a GitHub App. Create the App (permission
 *Contents: read-only*), install it on this repository and generate a private key (a `.pem`,
-`-----BEGIN RSA PRIVATE KEY-----`). Then store it in the `gitops` namespace, the only one Argo CD
-reads repository Secrets from, labelled as a repository:
+`-----BEGIN RSA PRIVATE KEY-----`). Store it in [OpenBao](#secrets-openbao--external-secrets):
 ```
-kubectl -n gitops create secret generic repo-init-raspberry \
-  --from-literal=type=git \
-  --from-literal=url=https://github.com/fralomb/init-raspberry \
-  --from-literal=githubAppID=<app-id> \
-  --from-literal=githubAppInstallationID=<installation-id> \
-  --from-file=githubAppPrivateKey=./argocd-app.private-key.pem
-kubectl -n gitops label secret repo-init-raspberry argocd.argoproj.io/secret-type=repository
+bao kv put secret/argocd/repo-init-raspberry \
+  githubAppID=<app-id> githubAppInstallationID=<installation-id> \
+  githubAppPrivateKey=@argocd-app.private-key.pem
 ```
+[k3s/argocd/argocd-repo-secret.yaml](k3s/argocd/argocd-repo-secret.yaml) turns it into the
+`repo-init-raspberry` Secret in `gitops` (the only namespace Argo CD reads repository Secrets
+from), adding `type`, `url` and the `argocd.argoproj.io/secret-type: repository` label.
 Both IDs are plain numbers:
 - `githubAppID` is the **App ID** shown at the top of the App's settings page (Settings →
   Developer settings → GitHub Apps → *app* → General). It is not the Client ID (`Iv1.…`) listed
@@ -189,10 +256,11 @@ Cloudflare DNS-01 `Issuer` plus the wildcard `Certificate`s live in
 [k3s/cert-manager/cloudflare-issuer.yaml](k3s/cert-manager/cloudflare-issuer.yaml). Both are in
 `k3s_addons`; k3s retries the issuer file until the chart has installed the cert-manager CRDs.
 
-Create a secret containing the API token of Cloudflare in the `kube-system` namespace (where the
-`Issuer` and Traefik live):
+The Cloudflare API token (permission *Zone → DNS → Edit*) goes in
+[OpenBao](#secrets-openbao--external-secrets); [k3s/cert-manager/cloudflare-secret.yaml](k3s/cert-manager/cloudflare-secret.yaml)
+syncs it to the `cloudflare` Secret in `kube-system`, where the `Issuer` and Traefik live:
 ```
-kubectl create secret generic cloudflare --from-literal=api-token=XXX --type=Opaque --namespace kube-system
+bao kv put secret/cloudflare api-token=XXX
 ```
 
 ### Tailscale (private access)
@@ -219,11 +287,10 @@ One-time setup in the [Tailscale admin console](https://login.tailscale.com/admi
 2. Settings → Trust credentials: create an OAuth client with the scopes listed in the
    [operator docs](https://tailscale.com/kb/1236/kubernetes-operator#prerequisites) (`Devices Core`,
    `Auth Keys`, `Services` write) and tag `tag:k8s-operator`.
-3. Store it in the cluster (the operator pod waits for this Secret):
+3. Store it in [OpenBao](#secrets-openbao--external-secrets). The operator pod waits for the
+   `operator-oauth` Secret, synced by [k3s/tailscale/operator-oauth-secret.yaml](k3s/tailscale/operator-oauth-secret.yaml):
    ```
-   kubectl create namespace tailscale
-   kubectl -n tailscale create secret generic operator-oauth \
-     --from-literal=client_id=XXX --from-literal=client_secret=YYY
+   bao kv put secret/tailscale/operator-oauth client_id=XXX client_secret=YYY
    ```
 
 Check with `kubectl get connector` and `kubectl -n tailscale get pods`; the `homelab-subnet-router`
@@ -340,17 +407,18 @@ presets are stored in the database and are kept. Configured there:
 sign-ups disabled, API keys enabled, `qwen3:1.7b` as default and task model (titles, tags), and
 document embeddings through Ollama (`nomic-embed-text`).
 
-The optional `open-webui-secret` Secret holds what can't be committed:
+What can't be committed lives in [OpenBao](#secrets-openbao--external-secrets) at
+`secret/open-webui`, synced to the `open-webui-secret` Secret by an `ExternalSecret` shipped with
+the chart (`extraResources`). All its keys are optional:
 - `secret-key` signs the login sessions. Without it, a random key is generated at every start and
   everyone is logged out on restart.
 - `admin-email` / `admin-password` create the admin account at start if no user exists yet.
   Without them, the first account created in the UI becomes the admin (sign-ups stay disabled
   for everyone after that).
 ```
-kubectl -n ai create secret generic open-webui-secret \
-  --from-literal=secret-key=$(openssl rand -hex 32) \
-  --from-literal=admin-email=<email> --from-literal=admin-password=<password>
-kubectl -n ai rollout restart statefulset open-webui
+bao kv put secret/open-webui secret-key=$(openssl rand -hex 32) \
+  admin-email=<email> admin-password=<password>
+kubectl -n ai rollout restart statefulset open-webui   # env vars are read at start
 ```
 
 OpenAI-compatible API for scripts, editors and agents: create a key in Settings → Account → API
