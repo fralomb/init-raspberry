@@ -37,7 +37,8 @@ spec:
       # TokenReview API (system:auth-delegator)
       authDelegator:
         enabled: true
-    # The UI service also routes to a sealed pod, so unsealing works from the browser
+    # The UI Service also routes to a sealed pod (publishNotReadyAddresses), so init and
+    # unseal work through the IngressRoute below
     ui:
       enabled: true
     # Shipped with the release rather than as a separate manifest, so it is only
@@ -57,5 +58,10 @@ spec:
               services:
                 - name: openbao-ui
                   port: 8200
+                  # Through the Service ClusterIP instead of the pod IPs: Traefik skips
+                  # pods that are not Ready (a sealed OpenBao never is) and would answer
+                  # 503, while kube-proxy honours the Service's publishNotReadyAddresses.
+                  # So init and unseal work through this name.
+                  nativeLB: true
           # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
           tls: {}

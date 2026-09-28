@@ -2,11 +2,15 @@
 # Brings OpenBao from "just installed" to "ready for External Secrets", through its
 # HTTP API. Each phase reads the current state first: re-runs only do what is missing.
 
-- name: Read the seal status
+# Retried while the pod is still starting (Traefik answers 502/503/504 meanwhile)
+- name: Wait for the OpenBao API
   uri:
     url: "{{ openbao_addr }}/v1/sys/seal-status"
     validate_certs: "{{ openbao_validate_certs }}"
   register: openbao_seal
+  until: openbao_seal.status == 200
+  retries: 30
+  delay: 10
 
 - name: Initialise
   include_tasks: init.yaml
