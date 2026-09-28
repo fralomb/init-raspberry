@@ -164,8 +164,14 @@ kubectl -n gitops create secret generic repo-init-raspberry \
   --from-file=githubAppPrivateKey=./argocd-app.private-key.pem
 kubectl -n gitops label secret repo-init-raspberry argocd.argoproj.io/secret-type=repository
 ```
-The installation ID is the number at the end of the installation's settings URL. Check with
-`kubectl -n gitops get applications`.
+Both IDs are plain numbers:
+- `githubAppID` is the **App ID** shown at the top of the App's settings page (Settings →
+  Developer settings → GitHub Apps → *app* → General). It is not the Client ID (`Iv1.…`) listed
+  just below it. With the Client ID, Argo CD fails with `strconv.ParseInt: parsing "Iv1.…"`.
+- `githubAppInstallationID` is the number at the end of the installation's settings URL
+  (`https://github.com/settings/installations/<id>`).
+
+Check with `kubectl -n gitops get applications`.
 
 ### Traefik
 k3s ships Traefik v3 as a packaged component. [k3s/traefik/traefik-config.yaml](k3s/traefik/traefik-config.yaml)
