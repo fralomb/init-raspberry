@@ -149,31 +149,38 @@ new or changed secrets wait for the unseal.
 #### First setup
 Once the playbook has run and the `openbao-0` pod is `Running` (not Ready: it is sealed):
 ```bash
-# 1. Initialise: prints 5 unseal keys and the root token, shown only this once.
-#    Store them in your password manager, never in this repo.
-kubectl -n openbao exec -ti openbao-0 -- bao operator init
+# 1. Init, unseal, and configure the KV engine, ESO policy and Kubernetes auth role.
+#    No certificate yet: Traefik serves its self-signed one, hence the flag.
+ansible-playbook openbao.yaml -e openbao_validate_certs=false
 
-# 2. Unseal: run 3 times, each with a different unseal key (prompted, not echoed)
-kubectl -n openbao exec -ti openbao-0 -- bao operator unseal
-
-# 3. KV engine, ESO policy and Kubernetes auth role (prompts for the root token)
-ansible-playbook openbao.yaml
-
-# 4. Secrets (paths and keys in the table above) with the local CLI (brew install openbao)
-kubectl -n openbao port-forward svc/openbao 8200 &
-export BAO_ADDR=http://127.0.0.1:8200
-bao login                                   # root token
+# 2. Secrets (paths and keys in the table above), with the local CLI (brew install openbao)
+export BAO_ADDR=https://bao.homelab.francesco-lombardo.it
+export BAO_SKIP_VERIFY=true                 # until the certificate is issued
+jq -r .root_token ~/.config/homelab/openbao-init.json | bao login -
 bao kv put secret/cloudflare api-token=XXX
 ```
-Step 3 is [openbao.yaml](openbao.yaml), which runs the `openbao-config` role on the master: it
-calls the OpenBao HTTP API on the Service's ClusterIP and only writes what differs from
-[roles/openbao-config/defaults/main.yaml](roles/openbao-config/defaults/main.yaml), where the KV
-mount, policies and Kubernetes auth roles are declared. It is kept out of `playbook.yaml` because
-it needs an unsealed OpenBao and the root token. Re-run it whenever those defaults change, e.g.
-to add a role for another consumer.
+[openbao.yaml](openbao.yaml) runs the [openbao](roles/openbao) role from the control machine
+against the OpenBao API at `https://bao.homelab.francesco-lombardo.it`. That IngressRoute points
+to the UI Service, which includes the sealed pod, so init and unseal go through it too. Each
+phase checks the current state first:
 
-The `bao kv put` examples in the sections below assume that shell. Once the certificate is
-issued, the UI at `https://bao.homelab.francesco-lombardo.it` works too.
+1. **Init** (only if not initialised): the 5 unseal keys and the root token are written to
+   `~/.config/homelab/openbao-init.json` (mode 0600, outside the repo), not printed.
+2. **Unseal** (only if sealed): with the keys from that file or, if it does not exist, prompted for.
+3. **Configure**: KV v2 mount, policies and Kubernetes auth roles from
+   [roles/openbao/defaults/main.yaml](roles/openbao/defaults/main.yaml), writing only what differs.
+   The token is `-e openbao_token=...`, else the root token from the file, else prompted for.
+
+The same command is used after a restart (unseal) and after changing the defaults (configure):
+`ansible-playbook openbao.yaml`. `-e openbao_validate_certs=false` is only needed until the
+wildcard certificate exists.
+
+Whoever has the init file can unseal OpenBao and has the root token, which defeats splitting
+the key. Once everything works, copy the keys and token to a password manager and delete
+the file: from then on the playbook asks for them.
+
+The `bao kv put` examples in the sections below assume that shell. The UI at
+`https://bao.homelab.francesco-lombardo.it` works too.
 
 The whole sequence, from wiping the nodes to testing rotation, sealing and backups, is in
 [docs/fresh-install.md](docs/fresh-install.md).
@@ -181,9 +188,9 @@ The whole sequence, from wiping the nodes to testing rotation, sealing and backu
 Secrets created earlier with `kubectl create secret` are taken over by their `ExternalSecret`
 (same name) at the first sync, so migrating needs no downtime.
 
-After a restart only step 2 is needed. Check with:
+After a restart, `ansible-playbook openbao.yaml` unseals it. Check with:
 ```bash
-kubectl -n openbao exec openbao-0 -- bao status        # Sealed: false
+bao status                                             # Sealed: false
 kubectl get clustersecretstore openbao                 # STATUS Valid
 kubectl get externalsecrets -A                         # STATUS SecretSynced
 ```
@@ -192,8 +199,7 @@ kubectl get externalsecrets -A                         # STATUS SecretSynced
 Raft snapshots hold every secret, encrypted with the root key, so they are only usable with the
 unseal keys:
 ```bash
-kubectl -n openbao exec openbao-0 -- sh -c 'BAO_TOKEN=<root token> bao operator raft snapshot save /tmp/bao.snap'
-kubectl -n openbao cp openbao-0:/tmp/bao.snap ./bao-$(date +%F).snap
+bao operator raft snapshot save bao-$(date +%F).snap
 ```
 
 ### Argocd

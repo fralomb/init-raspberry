@@ -4,3 +4,7 @@ k3s.yaml
 
 # Ansible
 *.retry
+
+# OpenBao unseal keys and root token (written outside the repo by openbao.yaml,
+# ignored here in case openbao_init_file is pointed inside it)
+openbao-init*.json

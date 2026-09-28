@@ -1,0 +1,38 @@
+---
+# First start only: generate the root key, split it into unseal keys, and save them
+# with the root token. The API returns them once and never again.
+
+- name: Initialise OpenBao
+  uri:
+    url: "{{ openbao_addr }}/v1/sys/init"
+    method: PUT
+    validate_certs: "{{ openbao_validate_certs }}"
+    body_format: json
+    body:
+      secret_shares: "{{ openbao_key_shares }}"
+      secret_threshold: "{{ openbao_key_threshold }}"
+  register: openbao_init_response
+  changed_when: true
+  no_log: true
+
+- name: Create the directory of the init file
+  file:
+    path: "{{ openbao_init_file | dirname }}"
+    state: directory
+    mode: "0700"
+
+# backup: an existing file (from a previous cluster) is kept with a timestamp suffix
+- name: Save the unseal keys and root token to {{ openbao_init_file }}
+  copy:
+    content: "{{ openbao_init_response.json | to_nice_json }}"
+    dest: "{{ openbao_init_file }}"
+    mode: "0600"
+    backup: true
+  no_log: true
+
+- name: Remind where the keys are
+  debug:
+    msg: >-
+      OpenBao initialised: {{ openbao_key_shares }} unseal keys (threshold
+      {{ openbao_key_threshold }}) and the root token are in {{ openbao_init_file }}.
+      Copy them to a password manager.

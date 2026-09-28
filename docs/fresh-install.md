@@ -9,7 +9,7 @@ Rebuild the cluster from scratch and check that every secret flows from OpenBao:
 | `secret/tailscale/operator-oauth` | `tailscale/operator-oauth` | Tailscale operator | Argo CD (`apps/tailscale`) |
 | `secret/open-webui` | `ai/open-webui-secret` | Open WebUI | Argo CD (`apps/ai`) |
 
-Bootstrap order: k3s addons (OpenBao, ESO, cert-manager, Argo CD) → manual init/unseal →
+Bootstrap order: k3s addons (OpenBao, ESO, cert-manager, Argo CD) → `openbao.yaml` (init, unseal, configure) →
 secrets in OpenBao → ESO syncs → certificates and Argo CD repo access → Argo CD deploys
 Tailscale and the AI stack.
 
@@ -44,32 +44,27 @@ kubectl get nodes -L homelab/ai          # both Ready, k3s-worker-1 has homelab/
 kubectl -n kube-system get helmcharts    # openbao, external-secrets, cert-manager, argocd
 ```
 
-## 3. Initialise and unseal OpenBao
+## 3. Initialise, unseal and configure OpenBao
 ```bash
 kubectl -n openbao get pods               # openbao-0 Running, 0/1 (sealed)
-kubectl -n openbao exec -ti openbao-0 -- bao operator init
+ansible-playbook openbao.yaml -e openbao_validate_certs=false
+kubectl -n openbao get pods               # openbao-0 1/1
+kubectl get clustersecretstore openbao    # STATUS Valid, READY True
 ```
-This prints 5 unseal keys and the root token **once**. Store them in your password manager.
-```bash
-# 3 times, a different key each time (prompted)
-kubectl -n openbao exec -ti openbao-0 -- bao operator unseal
-kubectl -n openbao exec openbao-0 -- bao status       # Initialized true, Sealed false
-kubectl -n openbao get pods                           # openbao-0 1/1
-```
+The playbook initialises OpenBao and writes the 5 unseal keys and the root token to
+`~/.config/homelab/openbao-init.json` (mode 0600). Then it unseals with 3 of them and configures
+the KV engine, the External Secrets policy and the Kubernetes auth role. Copy the file's content
+to your password manager.
 
-## 4. Configure OpenBao for External Secrets
-```bash
-ansible-playbook openbao.yaml                         # prompts for the root token
-kubectl get clustersecretstore openbao                # STATUS Valid, READY True
-```
-A second run reports `changed=0`: the role reads the current state and only writes differences.
+`-e openbao_validate_certs=false`: Traefik serves its self-signed certificate until cert-manager
+has the Cloudflare token (step 4). A second run reports `changed=0`.
 
-## 5. Store the secrets
-There is no certificate yet (it needs the Cloudflare token), so go through a port-forward:
+## 4. Store the secrets
+Same DNS name, with the local CLI:
 ```bash
-kubectl -n openbao port-forward svc/openbao 8200 &
-export BAO_ADDR=http://127.0.0.1:8200
-bao login                                              # paste the root token
+export BAO_ADDR=https://bao.homelab.francesco-lombardo.it
+export BAO_SKIP_VERIFY=true                            # until the certificate is issued
+jq -r .root_token ~/.config/homelab/openbao-init.json | bao login -
 
 bao kv put secret/cloudflare api-token=<token>
 bao kv put secret/tailscale/operator-oauth client_id=<id> client_secret=<secret>
@@ -82,7 +77,7 @@ bao kv put secret/open-webui secret-key=$(openssl rand -hex 32) \
 bao kv list secret/                                   # argocd/ cloudflare open-webui tailscale/
 ```
 
-## 6. Bootstrap secrets synced
+## 5. Bootstrap secrets synced
 ```bash
 kubectl get externalsecrets -A
 #   kube-system  cloudflare            SecretSynced
@@ -94,9 +89,10 @@ ESO refreshes every hour. To sync right away, force it:
 `kubectl -n kube-system annotate externalsecret cloudflare force-sync=$(date +%s) --overwrite`.
 
 Now `https://bao.homelab.francesco-lombardo.it` and `https://argocd.homelab.francesco-lombardo.it`
-serve a valid certificate.
+serve a valid certificate: `unset BAO_SKIP_VERIFY`, and from now on run `openbao.yaml` without
+`-e openbao_validate_certs=false`.
 
-## 7. Argo CD: sync from the branch
+## 6. Argo CD: sync from the branch
 ```bash
 kubectl -n gitops patch application homelab-apps --type merge \
   -p '{"spec":{"source":{"targetRevision":"claude/dazzling-keller-oao382"}}}'
@@ -107,7 +103,7 @@ While the Tailscale CRDs are installing, the root app briefly shows a failed syn
 `Connector`; its retry settles it. Argo CD UI admin password:
 `kubectl -n gitops get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d`.
 
-## 8. Tailscale
+## 7. Tailscale
 ```bash
 kubectl -n tailscale get externalsecret operator-oauth    # SecretSynced
 kubectl -n tailscale get pods                             # operator + subnet router Running
@@ -117,7 +113,7 @@ In the admin console, `homelab-k8s-operator` and `homelab-subnet-router` show up
 `192.168.1.0/24` route is auto-approved. Test from a phone on mobile data with Tailscale on:
 `https://argocd.homelab.francesco-lombardo.it` loads.
 
-## 9. Local AI
+## 8. Local AI
 ```bash
 kubectl -n ai get pods,pvc -o wide        # ollama on k3s-worker-1, open-webui on k3s-master
 kubectl -n ai get externalsecret open-webui-secret        # SecretSynced
@@ -137,7 +133,7 @@ curl https://ai.homelab.francesco-lombardo.it/api/chat/completions \
   -d '{"model": "qwen3:1.7b", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
-## 10. OpenBao scenarios
+## 9. OpenBao scenarios
 **Rotation.** A change in OpenBao reaches the Secret:
 ```bash
 bao kv patch secret/open-webui secret-key=$(openssl rand -hex 32)
@@ -155,11 +151,11 @@ kubectl get externalsecrets -A                         # SecretSyncedError...
 kubectl -n kube-system get secret cloudflare           # ...but the Secret is still there
 curl -sI https://ai.homelab.francesco-lombardo.it | head -1   # still served
 ```
-Then unseal (step 3, three keys) and the store and ExternalSecrets go back to Valid and
+Then unseal with `ansible-playbook openbao.yaml` and the store and ExternalSecrets go back to Valid and
 SecretSynced at the next refresh (or force-sync).
 
 **Node reboot.** Reboot the node running OpenBao
-(`kubectl -n openbao get pod openbao-0 -o wide`) and check it comes back sealed. Unseal, and
+(`kubectl -n openbao get pod openbao-0 -o wide`) and check it comes back sealed. `ansible-playbook openbao.yaml` unseals it, and
 nothing else is needed.
 
 **Backup and restore.**
@@ -170,7 +166,7 @@ bao operator raft snapshot restore bao-<date>.snap
 ```
 The snapshot is encrypted and only usable with the unseal keys.
 
-## 11. Finish
+## 10. Finish
 - Create a personal login instead of the root token, then revoke it:
   ```bash
   bao auth enable userpass
@@ -181,5 +177,9 @@ The snapshot is encrypted and only usable with the unseal keys.
   bao token revoke -self
   ```
   A new root token can be generated at any time with the unseal keys (`bao operator generate-root`).
+  With the root token revoked, give `openbao.yaml` a token for the configure phase:
+  `-e openbao_token=$(bao print token)` after `bao login -method=userpass username=<you>`.
+- Move `~/.config/homelab/openbao-init.json` to your password manager and delete it. After
+  that, `openbao.yaml` prompts for the unseal keys.
 - Merge the PR. Then either re-run the playbook, or reset the root app with
   `kubectl -n gitops patch application homelab-apps --type merge -p '{"spec":{"source":{"targetRevision":"HEAD"}}}'`.

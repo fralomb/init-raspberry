@@ -1,0 +1,27 @@
+---
+# Brings OpenBao from "just installed" to "ready for External Secrets", through its
+# HTTP API. Each phase reads the current state first: re-runs only do what is missing.
+
+- name: Read the seal status
+  uri:
+    url: "{{ openbao_addr }}/v1/sys/seal-status"
+    validate_certs: "{{ openbao_validate_certs }}"
+  register: openbao_seal
+
+- name: Initialise
+  include_tasks: init.yaml
+  when: not openbao_seal.json.initialized
+
+# After init: sealed, and the key threshold (`t`) is now known
+- name: Read the seal status again
+  uri:
+    url: "{{ openbao_addr }}/v1/sys/seal-status"
+    validate_certs: "{{ openbao_validate_certs }}"
+  register: openbao_seal
+
+- name: Unseal
+  include_tasks: unseal.yaml
+  when: openbao_seal.json.sealed
+
+- name: Configure
+  include_tasks: configure.yaml
