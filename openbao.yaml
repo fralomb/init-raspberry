@@ -1,0 +1,17 @@
+---
+# OpenBao configuration: KV engine, policies and Kubernetes auth for External Secrets.
+# Run after `bao operator init` and unseal (see README), and whenever
+# roles/openbao-config/defaults/main.yaml changes:
+#   ansible-playbook openbao.yaml
+# The root token is prompted for (or pass -e openbao_token=...). It only travels
+# from the control machine to the master, as an HTTP header to the OpenBao Service.
+
+- name: Configure OpenBao
+  hosts: master
+  gather_facts: no
+  vars_prompt:
+    - name: openbao_token
+      prompt: OpenBao root token
+      private: yes
+  roles:
+    - role: openbao-config

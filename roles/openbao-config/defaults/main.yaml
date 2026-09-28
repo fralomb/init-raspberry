@@ -1,0 +1,32 @@
+---
+# Where the tasks reach OpenBao. Empty: the ClusterIP of the openbao Service, looked
+# up with `k3s kubectl` on the host running the play (service IPs are routed on the nodes).
+openbao_addr: ""
+openbao_namespace: openbao
+openbao_service: openbao
+
+# KV v2 engine holding the homelab secrets (paths in README)
+openbao_kv_mount: secret
+
+# ACL policies, name -> HCL
+openbao_policies:
+  external-secrets: |
+    path "secret/data/*" {
+      capabilities = ["read"]
+    }
+    path "secret/metadata/*" {
+      capabilities = ["read", "list"]
+    }
+
+# Kubernetes auth: OpenBao validates ServiceAccount tokens with the TokenReview API,
+# using its own ServiceAccount (system:auth-delegator, set by the chart).
+openbao_kubernetes_host: https://kubernetes.default.svc:443
+
+# Kubernetes auth roles, name -> role parameters
+openbao_kubernetes_roles:
+  # External Secrets Operator (ClusterSecretStore `openbao`)
+  external-secrets:
+    bound_service_account_names: [external-secrets]
+    bound_service_account_namespaces: [external-secrets]
+    token_policies: [external-secrets]
+    token_ttl: 3600

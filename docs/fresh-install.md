@@ -59,9 +59,10 @@ kubectl -n openbao get pods                           # openbao-0 1/1
 
 ## 4. Configure OpenBao for External Secrets
 ```bash
-BAO_TOKEN=<root token> k3s/openbao/configure.sh
+ansible-playbook openbao.yaml                         # prompts for the root token
 kubectl get clustersecretstore openbao                # STATUS Valid, READY True
 ```
+A second run reports `changed=0`: the role reads the current state and only writes differences.
 
 ## 5. Store the secrets
 There is no certificate yet (it needs the Cloudflare token), so go through a port-forward:

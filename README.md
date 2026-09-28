@@ -156,8 +156,8 @@ kubectl -n openbao exec -ti openbao-0 -- bao operator init
 # 2. Unseal: run 3 times, each with a different unseal key (prompted, not echoed)
 kubectl -n openbao exec -ti openbao-0 -- bao operator unseal
 
-# 3. KV engine, ESO policy and Kubernetes auth role
-BAO_TOKEN=<root token> k3s/openbao/configure.sh
+# 3. KV engine, ESO policy and Kubernetes auth role (prompts for the root token)
+ansible-playbook openbao.yaml
 
 # 4. Secrets (paths and keys in the table above) with the local CLI (brew install openbao)
 kubectl -n openbao port-forward svc/openbao 8200 &
@@ -165,6 +165,13 @@ export BAO_ADDR=http://127.0.0.1:8200
 bao login                                   # root token
 bao kv put secret/cloudflare api-token=XXX
 ```
+Step 3 is [openbao.yaml](openbao.yaml), which runs the `openbao-config` role on the master: it
+calls the OpenBao HTTP API on the Service's ClusterIP and only writes what differs from
+[roles/openbao-config/defaults/main.yaml](roles/openbao-config/defaults/main.yaml), where the KV
+mount, policies and Kubernetes auth roles are declared. It is kept out of `playbook.yaml` because
+it needs an unsealed OpenBao and the root token. Re-run it whenever those defaults change, e.g.
+to add a role for another consumer.
+
 The `bao kv put` examples in the sections below assume that shell. Once the certificate is
 issued, the UI at `https://bao.homelab.francesco-lombardo.it` works too.
 
