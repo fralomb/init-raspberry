@@ -53,6 +53,24 @@ spec:
           limits:
             memory: 1536Mi
         extraEnvVars:
+          # Settings come from these values on every start: whatever is changed in
+          # Admin settings is temporary until copied here. Users, chats and model
+          # presets live in the database and are not affected.
+          - name: ENABLE_PERSISTENT_CONFIG
+            value: "False"
+          # The first account (or the WEBUI_ADMIN_* one below) is the admin; after
+          # that only the admin adds users.
+          - name: ENABLE_SIGNUP
+            value: "False"
+          # Per-user keys for the OpenAI-compatible API (off by default)
+          - name: ENABLE_API_KEYS
+            value: "True"
+          - name: DEFAULT_MODELS
+            value: qwen3:1.7b
+          # Chat titles, tags and follow-ups with the default model: a different one
+          # would evict it (Ollama keeps a single model in memory)
+          - name: TASK_MODEL
+            value: qwen3:1.7b
           # Embeddings for documents/RAG through Ollama, instead of downloading a
           # sentence-transformers model into the pod
           - name: RAG_EMBEDDING_ENGINE
@@ -66,6 +84,19 @@ spec:
               secretKeyRef:
                 name: open-webui-secret
                 key: secret-key
+                optional: true
+          # Admin account created at start when no user exists yet (optional Secret)
+          - name: WEBUI_ADMIN_EMAIL
+            valueFrom:
+              secretKeyRef:
+                name: open-webui-secret
+                key: admin-email
+                optional: true
+          - name: WEBUI_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: open-webui-secret
+                key: admin-password
                 optional: true
         extraResources:
           - apiVersion: traefik.io/v1alpha1

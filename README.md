@@ -329,22 +329,37 @@ kubectl -n ai exec deploy/ollama -- ollama list
 ```
 
 ### Open WebUI
-- The first account created on `https://ai.homelab.francesco-lombardo.it` becomes the admin.
-  Right after, disable sign-ups in Admin settings → General (stored in its database, not in
-  the chart values) and add users from there.
-- Optional, to keep users logged in across restarts: a fixed session key (otherwise a random
-  one is generated at every start):
-  ```
-  kubectl -n ai create secret generic open-webui-secret --from-literal=secret-key=$(openssl rand -hex 32)
-  kubectl -n ai rollout restart statefulset open-webui
-  ```
-- OpenAI-compatible API for scripts, editors and agents: create a key in Settings → Account → API
-  keys, then use `https://ai.homelab.francesco-lombardo.it/api` as base URL:
-  ```
-  curl https://ai.homelab.francesco-lombardo.it/api/chat/completions \
-    -H "Authorization: Bearer $OPENWEBUI_API_KEY" -H 'Content-Type: application/json' \
-    -d '{"model": "qwen3:1.7b", "messages": [{"role": "user", "content": "hello"}]}'
-  ```
+Open WebUI reaches Ollama through `OLLAMA_BASE_URLS` (`ollamaUrls` in the chart values), so the
+pulled models show up in the model picker with nothing to set in the UI. Admin settings →
+Connections shows the in-cluster URL.
+
+Its settings are declared in [apps/ai/open-webui.yaml](apps/ai/open-webui.yaml) and git wins:
+`ENABLE_PERSISTENT_CONFIG=False` re-applies them on every start, so a change made in Admin
+settings lasts until the next restart unless it is copied into the values. Users, chats and model
+presets are stored in the database and are kept. Configured there:
+sign-ups disabled, API keys enabled, `qwen3:1.7b` as default and task model (titles, tags), and
+document embeddings through Ollama (`nomic-embed-text`).
+
+The optional `open-webui-secret` Secret holds what can't be committed:
+- `secret-key` signs the login sessions. Without it, a random key is generated at every start and
+  everyone is logged out on restart.
+- `admin-email` / `admin-password` create the admin account at start if no user exists yet.
+  Without them, the first account created in the UI becomes the admin (sign-ups stay disabled
+  for everyone after that).
+```
+kubectl -n ai create secret generic open-webui-secret \
+  --from-literal=secret-key=$(openssl rand -hex 32) \
+  --from-literal=admin-email=<email> --from-literal=admin-password=<password>
+kubectl -n ai rollout restart statefulset open-webui
+```
+
+OpenAI-compatible API for scripts, editors and agents: create a key in Settings → Account → API
+keys, then use `https://ai.homelab.francesco-lombardo.it/api` as base URL:
+```
+curl https://ai.homelab.francesco-lombardo.it/api/chat/completions \
+  -H "Authorization: Bearer $OPENWEBUI_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"model": "qwen3:1.7b", "messages": [{"role": "user", "content": "hello"}]}'
+```
 
 Check the deployment:
 ```
