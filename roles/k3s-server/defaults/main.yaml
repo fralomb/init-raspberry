@@ -28,13 +28,8 @@ k3s_addons:
   - k3s/cert-manager/cloudflare-secret.yaml
   - k3s/argocd/argocd-chart.yaml
   # Needs the argoproj.io CRDs: k3s retries it until the chart above installs them.
-  - k3s/argocd/argocd-apps.yaml.j2
+  - k3s/argocd/argocd-apps.yaml
   - k3s/argocd/argocd-repo-secret.yaml
-
-# Git revision the Argo CD root app (k3s/argocd/argocd-apps.yaml.j2) syncs apps/ from.
-# HEAD is the repo's default branch; to test a branch before merging:
-#   ansible-playbook playbook.yaml -K -e argocd_apps_revision=<branch>
-argocd_apps_revision: HEAD
 
 # Copy /etc/rancher/k3s/k3s.yaml to the control machine after install.
 # Kept outside the repo: it holds cluster-admin client cert and key.
