@@ -406,7 +406,20 @@ The Pi 5 is reserved for the models, with two settings in
 - label `homelab/ai=true` (`k3s_node_labels`): Ollama's `nodeSelector` and the SSD
   PersistentVolume select the node by it.
 - taint `homelab/ai=true:NoSchedule` (`k3s_node_taints`): no pod is scheduled there unless it
-  tolerates the taint, and only Ollama does. Everything else runs on the master.
+  tolerates the taint. Only Ollama and the per-node DaemonSets do; everything else runs on the
+  master.
+
+Per-node workloads (DaemonSets) must run on the Pi 5 too, so they get a toleration:
+```yaml
+tolerations:
+  - key: homelab/ai
+    operator: Exists
+    effect: NoSchedule
+```
+Today the only one is k3s's ServiceLB (`svclb-traefik`, exposing Traefik on every node). k3s adds
+the tolerations from the `svccontroller.k3s.cattle.io/tolerations` annotation on the Traefik
+Service, set in [k3s/traefik/traefik-config.yaml](k3s/traefik/traefik-config.yaml). Flannel and
+kube-proxy run inside the k3s binary, not as pods, so the taint does not affect them.
 
 The last play of `playbook.yaml` applies both (the node name is the inventory hostname, which
 must match the Pi's hostname). The taint does not evict pods already running on the node: they

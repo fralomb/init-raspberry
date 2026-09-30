@@ -6,6 +6,13 @@ metadata:
   namespace: kube-system
 spec:
   valuesContent: |-
+    # ServiceLB (klipper-lb) runs one svclb-traefik pod per node to expose 80/443 on
+    # every node IP. k3s adds this annotation's tolerations to that DaemonSet, so it
+    # also runs on the Pi 5 despite its homelab/ai taint (host_vars/k3s-worker-1.yaml).
+    service:
+      annotations:
+        svccontroller.k3s.cattle.io/tolerations: |
+          [{"key": "homelab/ai", "operator": "Exists", "effect": "NoSchedule"}]
     tlsStore:
       default:
         certificates:
