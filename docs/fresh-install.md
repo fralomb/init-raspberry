@@ -38,7 +38,8 @@ The uninstall scripts remove k3s, its data and every PersistentVolume under
 ## 2. Install
 ```bash
 git checkout claude/dazzling-keller-oao382
-ansible-playbook playbook.yaml -K
+# The Argo CD root app syncs apps/ from this branch (master has no apps/ yet)
+ansible-playbook playbook.yaml -K -e argocd_apps_revision=claude/dazzling-keller-oao382
 export KUBECONFIG=~/.kube/config-raspberry
 kubectl get nodes -L homelab/ai          # both Ready, k3s-worker-1 has homelab/ai=true
 kubectl -n kube-system get helmcharts    # openbao, external-secrets, cert-manager, argocd
@@ -92,10 +93,10 @@ Now `https://bao.homelab.francesco-lombardo.it` and `https://argocd.homelab.fran
 serve a valid certificate: `unset BAO_SKIP_VERIFY`, and from now on run `openbao.yaml` without
 `-e openbao_validate_certs=false`.
 
-## 6. Argo CD: sync from the branch
+## 6. Argo CD
+The root app already follows the branch (`-e argocd_apps_revision=…` in step 2):
 ```bash
-kubectl -n gitops patch application homelab-apps --type merge \
-  -p '{"spec":{"source":{"targetRevision":"claude/dazzling-keller-oao382"}}}'
+kubectl -n gitops get application homelab-apps -o jsonpath='{.spec.source.targetRevision}'; echo
 kubectl -n gitops get applications -w
 #   homelab-apps, tailscale-operator, ollama, open-webui → Synced / Healthy
 ```
@@ -181,5 +182,5 @@ The snapshot is encrypted and only usable with the unseal keys.
   `-e openbao_token=$(bao print token)` after `bao login -method=userpass username=<you>`.
 - Move `~/.config/homelab/openbao-init.json` to your password manager and delete it. After
   that, `openbao.yaml` prompts for the unseal keys.
-- Merge the PR. Then either re-run the playbook, or reset the root app with
-  `kubectl -n gitops patch application homelab-apps --type merge -p '{"spec":{"source":{"targetRevision":"HEAD"}}}'`.
+- Merge the PR, then run `ansible-playbook playbook.yaml -K` without `-e argocd_apps_revision`:
+  the root app goes back to `HEAD`.

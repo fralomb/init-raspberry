@@ -2,7 +2,9 @@
 # Root "app of apps": Argo CD syncs every manifest under apps/ in this repo, which in
 # turn holds the Applications of the homelab workloads.
 # Needs the argoproj.io CRDs: k3s retries it until the argocd chart installs them.
-# Private repo: Argo CD reads it with the repository Secret created in `gitops` (see README).
+# Private repo: Argo CD reads it with the repository Secret synced into `gitops` by ESO.
+# targetRevision is argocd_apps_revision (roles/k3s-server/defaults/main.yaml): HEAD, or a
+# branch under test (-e argocd_apps_revision=<branch>).
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -12,7 +14,7 @@ spec:
   project: default
   source:
     repoURL: https://github.com/fralomb/init-raspberry
-    targetRevision: HEAD
+    targetRevision: {{ argocd_apps_revision }}
     path: apps
     directory:
       recurse: true

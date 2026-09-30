@@ -230,10 +230,20 @@ kubectl -n gitops get secret argocd-initial-admin-secret -o jsonpath='{.data.pas
 ```
 
 #### Applications (app of apps)
-[k3s/argocd/argocd-apps.yaml](k3s/argocd/argocd-apps.yaml), also in `k3s_addons`, is the root
+[k3s/argocd/argocd-apps.yaml.j2](k3s/argocd/argocd-apps.yaml.j2), also in `k3s_addons`, is the root
 `homelab-apps` Application: Argo CD syncs every manifest under [apps/](apps) (recursively, with
 prune and self-heal), and those are the Applications of the homelab workloads. Add a workload by
 committing its manifests there, not by editing `k3s_addons`.
+
+It is an Ansible template (AddOns ending in `.j2` are rendered, the others copied as they are):
+the revision it syncs is `argocd_apps_revision`, `HEAD` (the default branch, `master`) unless
+overridden. To test a branch before merging:
+```
+ansible-playbook playbook.yaml -K -e argocd_apps_revision=<branch>
+```
+A plain `kubectl patch` of the Application would be undone at the next playbook run or k3s
+restart, when k3s re-applies the AddOn. On a branch that does not exist on `master` yet, Argo CD
+otherwise reports `apps: app path does not exist`.
 
 The repo is private, so Argo CD reads it through a GitHub App. Create the App (permission
 *Contents: read-only*), install it on this repository and generate a private key (a `.pem`,
