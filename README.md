@@ -69,6 +69,10 @@ What it does:
   `/boot/firmware/cmdline.txt`, and reboots if the kernel parameters changed. Note the
   Pi firmware injects `cgroup_disable=memory`; the appended `cgroup_enable=memory`
   comes later on the command line and wins.
+  It also sets the node's DNS servers to `common_dns_servers` (1.1.1.1, 8.8.8.8) on the
+  NetworkManager connection, instead of the router's: containerd resolves registries through
+  the node, and the router's resolver drops queries during image pulls
+  (`dial tcp: lookup ghcr.io: Try again`). Set `common_dns_servers: []` to keep the DHCP DNS.
 - **`k3s-server` role** (master): installs k3s in server mode via the official
   `get.k3s.io` script and reads the generated node token.
 - **`k3s-agent` role** (workers): installs k3s in agent mode, joining the master with

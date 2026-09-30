@@ -22,3 +22,31 @@
     replace: '\1 {{ cgroup_options }}'
   notify:
     - Reboot
+
+# DNS: set on the NetworkManager connection of the default-route interface, ignoring
+# the DHCP-provided servers (and search domain). `device reapply` applies it without
+# taking the link down, so the SSH session survives.
+- name: Pin the DNS servers
+  when: common_dns_servers | length > 0
+  block:
+    - name: Find the connection of {{ ansible_default_ipv4.interface }}
+      command: nmcli -g GENERAL.CONNECTION device show {{ ansible_default_ipv4.interface }}
+      register: common_nm_connection
+      changed_when: false
+
+    - name: Read its DNS settings
+      command: >-
+        nmcli -g ipv4.dns,ipv4.ignore-auto-dns connection show "{{ common_nm_connection.stdout }}"
+      register: common_nm_dns
+      changed_when: false
+
+    - name: Set the DNS servers on {{ common_nm_connection.stdout }}
+      command: >-
+        nmcli connection modify "{{ common_nm_connection.stdout }}"
+        ipv4.dns "{{ common_dns_servers | join(',') }}" ipv4.ignore-auto-dns yes
+        ipv6.ignore-auto-dns yes
+      when: common_nm_dns.stdout_lines != [common_dns_servers | join(','), 'yes']
+
+    - name: Apply them to {{ ansible_default_ipv4.interface }}
+      command: nmcli device reapply {{ ansible_default_ipv4.interface }}
+      when: common_nm_dns.stdout_lines != [common_dns_servers | join(','), 'yes']
