@@ -368,8 +368,8 @@ the chat UI and API in front of it, both deployed by Argo CD from [apps/ai/](app
 
 | | Node | Exposed |
 |---|---|---|
-| Ollama ([apps/ai/ollama.yaml](apps/ai/ollama.yaml)) | Pi 5 (8 GB), label `homelab/ai=true` | no: ClusterIP only, it has no authentication |
-| Open WebUI ([apps/ai/open-webui.yaml](apps/ai/open-webui.yaml)) | any other node | `https://ai.homelab.francesco-lombardo.it` |
+| Ollama ([apps/ai/ollama.yaml](apps/ai/ollama.yaml)) | Pi 5 (8 GB): label + taint `homelab/ai=true` | no: ClusterIP only, it has no authentication |
+| Open WebUI ([apps/ai/open-webui.yaml](apps/ai/open-webui.yaml)) | master (the Pi 5 is tainted) | `https://ai.homelab.francesco-lombardo.it` |
 
 Inference runs on the CPU (llama.cpp), so stick to small quantized models. On the Pi 5,
 `qwen3:1.7b`/`gemma3:1b` answer quickly and `qwen3:4b`/`gemma3:4b`/`llama3.2:3b` are better
@@ -400,11 +400,20 @@ only, run `ansible-galaxy collection install -r requirements.yml`.
 [apps/ai/storage.yaml](apps/ai/storage.yaml) turns that directory into a `local` PersistentVolume
 bound to the `homelab/ai=true` node, which also pins Ollama there.
 
-### Node label
-`k3s_node_labels` in a host's vars is applied by the last play of `playbook.yaml` (the node name
-is the inventory hostname, which must match the Pi's hostname). To set it without the playbook:
+### Node label and taint
+The Pi 5 is reserved for the models, with two settings in
+[host_vars/k3s-worker-1.yaml](host_vars/k3s-worker-1.yaml):
+- label `homelab/ai=true` (`k3s_node_labels`): Ollama's `nodeSelector` and the SSD
+  PersistentVolume select the node by it.
+- taint `homelab/ai=true:NoSchedule` (`k3s_node_taints`): no pod is scheduled there unless it
+  tolerates the taint, and only Ollama does. Everything else runs on the master.
+
+The last play of `playbook.yaml` applies both (the node name is the inventory hostname, which
+must match the Pi's hostname). The taint does not evict pods already running on the node: they
+move at their next restart. By hand:
 ```
 kubectl label node k3s-worker-1 homelab/ai=true
+kubectl taint node k3s-worker-1 homelab/ai=true:NoSchedule
 ```
 
 ### Models

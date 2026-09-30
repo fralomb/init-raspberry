@@ -41,6 +41,7 @@ git checkout claude/dazzling-keller-oao382
 ansible-playbook playbook.yaml -K
 export KUBECONFIG=~/.kube/config-raspberry
 kubectl get nodes -L homelab/ai          # both Ready, k3s-worker-1 has homelab/ai=true
+kubectl describe node k3s-worker-1 | grep Taints   # homelab/ai=true:NoSchedule
 kubectl -n kube-system get helmcharts    # openbao, external-secrets, cert-manager, argocd
 ```
 

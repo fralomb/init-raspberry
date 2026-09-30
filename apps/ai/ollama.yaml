@@ -49,8 +49,15 @@ spec:
           storageClass: local-ssd
           volumeName: ollama-models
           size: 60Gi
+        # The Pi 5: the label brings Ollama there, the toleration lets it past the
+        # taint that keeps every other pod off that node
         nodeSelector:
           homelab/ai: "true"
+        tolerations:
+          - key: homelab/ai
+            operator: Equal
+            value: "true"
+            effect: NoSchedule
         resources:
           requests:
             cpu: "1"
