@@ -29,8 +29,8 @@
 - name: Pin the DNS servers
   when: common_dns_servers | length > 0
   block:
-    - name: Find the connection of {{ ansible_default_ipv4.interface }}
-      command: nmcli -g GENERAL.CONNECTION device show {{ ansible_default_ipv4.interface }}
+    - name: Find the connection of {{ ansible_facts['default_ipv4']['interface'] }}
+      command: nmcli -g GENERAL.CONNECTION device show {{ ansible_facts['default_ipv4']['interface'] }}
       register: common_nm_connection
       changed_when: false
 
@@ -47,6 +47,6 @@
         ipv6.ignore-auto-dns yes
       when: common_nm_dns.stdout_lines != [common_dns_servers | join(','), 'yes']
 
-    - name: Apply them to {{ ansible_default_ipv4.interface }}
-      command: nmcli device reapply {{ ansible_default_ipv4.interface }}
+    - name: Apply them to {{ ansible_facts['default_ipv4']['interface'] }}
+      command: nmcli device reapply {{ ansible_facts['default_ipv4']['interface'] }}
       when: common_nm_dns.stdout_lines != [common_dns_servers | join(','), 'yes']
