@@ -1,0 +1,12 @@
+---
+# Raspberry Pi 5 (8 GB) with a USB SSD: runs the local AI models (apps/ai).
+ssd_storage: true
+
+# Applied by the last play in playbook.yaml.
+# The label attracts: Ollama's nodeSelector and the SSD PersistentVolume select it.
+k3s_node_labels:
+  homelab/ai: "true"
+# The taint repels: only pods tolerating it (Ollama) are scheduled here, so the
+# node's memory stays for the models.
+k3s_node_taints:
+  - homelab/ai=true:NoSchedule

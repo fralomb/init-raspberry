@@ -1,0 +1,20 @@
+---
+
+# Formatting is left to a manual step: it is destructive and done once (see README).
+- name: Mount the SSD by filesystem label
+  ansible.posix.mount:
+    src: "LABEL={{ ssd_label }}"
+    path: "{{ ssd_mount }}"
+    fstype: "{{ ssd_fstype }}"
+    # nofail: the node still boots if the disk is unplugged
+    opts: defaults,noatime,nofail
+    state: mounted
+
+- name: Create directories on the SSD
+  file:
+    path: "{{ ssd_mount }}/{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: 0755
+  loop: "{{ ssd_directories }}"

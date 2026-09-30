@@ -1,0 +1,33 @@
+---
+# Root "app of apps": Argo CD syncs every manifest under apps/ in this repo, which in
+# turn holds the Applications of the homelab workloads.
+# Needs the argoproj.io CRDs: k3s retries it until the argocd chart installs them.
+# Private repo: Argo CD reads it with the repository Secret created in `gitops` (see README).
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: homelab-apps
+  namespace: gitops
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/fralomb/init-raspberry
+    targetRevision: HEAD
+    path: apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitops
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    # Resources whose CRDs come from a child Application (e.g. the Tailscale
+    # Connector) fail until that app has synced: keep retrying.
+    retry:
+      limit: 20
+      backoff:
+        duration: 15s
+        factor: 2
+        maxDuration: 5m

@@ -1,0 +1,135 @@
+---
+# Open WebUI: chat UI and OpenAI-compatible API (per-user API keys) in front of Ollama,
+# at https://ai.homelab.francesco-lombardo.it. Kept off the AI node (Pi 5) by its homelab/ai taint.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: open-webui
+  namespace: gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://helm.openwebui.com/
+    chart: open-webui
+    targetRevision: 16.6.0
+    helm:
+      releaseName: open-webui
+      valuesObject:
+        # Ollama is the separate `ollama` Application
+        ollama:
+          enabled: false
+        ollamaUrls:
+          - http://ollama.ai.svc.cluster.local:11434
+        # No OpenAI upstream, no Pipelines/Tika, in-memory websocket manager (single
+        # replica): no extra pods on the Pi.
+        enableOpenaiApi: false
+        pipelines:
+          enabled: false
+        tika:
+          enabled: false
+        websocket:
+          enabled: false
+          redis:
+            enabled: false
+        workload:
+          kind: StatefulSet
+        persistence:
+          enabled: true
+          size: 2Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 512Mi
+          limits:
+            memory: 1536Mi
+        extraEnvVars:
+          # Settings come from these values on every start: whatever is changed in
+          # Admin settings is temporary until copied here. Users, chats and model
+          # presets live in the database and are not affected.
+          - name: ENABLE_PERSISTENT_CONFIG
+            value: "False"
+          # The first account (or the WEBUI_ADMIN_* one below) is the admin; after
+          # that only the admin adds users.
+          - name: ENABLE_SIGNUP
+            value: "False"
+          # Per-user keys for the OpenAI-compatible API (off by default)
+          - name: ENABLE_API_KEYS
+            value: "True"
+          - name: DEFAULT_MODELS
+            value: qwen3:1.7b
+          # Chat titles, tags and follow-ups with the default model: a different one
+          # would evict it (Ollama keeps a single model in memory)
+          - name: TASK_MODEL
+            value: qwen3:1.7b
+          # Embeddings for documents/RAG through Ollama, instead of downloading a
+          # sentence-transformers model into the pod
+          - name: RAG_EMBEDDING_ENGINE
+            value: ollama
+          - name: RAG_EMBEDDING_MODEL
+            value: nomic-embed-text
+          # Signs the login sessions. Without the (optional) Secret a random key is
+          # generated at every start and everyone gets logged out on restart.
+          - name: WEBUI_SECRET_KEY
+            valueFrom:
+              secretKeyRef:
+                name: open-webui-secret
+                key: secret-key
+                optional: true
+          # Admin account created at start when no user exists yet (optional Secret)
+          - name: WEBUI_ADMIN_EMAIL
+            valueFrom:
+              secretKeyRef:
+                name: open-webui-secret
+                key: admin-email
+                optional: true
+          - name: WEBUI_ADMIN_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                name: open-webui-secret
+                key: admin-password
+                optional: true
+        extraResources:
+          # secret-key, admin-email, admin-password from OpenBao secret/open-webui
+          # (all referenced as optional above)
+          - apiVersion: external-secrets.io/v1
+            kind: ExternalSecret
+            metadata:
+              name: open-webui-secret
+              namespace: ai
+            spec:
+              refreshInterval: 1h
+              secretStoreRef:
+                kind: ClusterSecretStore
+                name: openbao
+              target:
+                name: open-webui-secret
+              dataFrom:
+                - extract:
+                    key: open-webui
+          - apiVersion: traefik.io/v1alpha1
+            kind: IngressRoute
+            metadata:
+              name: open-webui
+              namespace: ai
+            spec:
+              entryPoints:
+                - websecure
+              routes:
+                - kind: Rule
+                  match: Host(`ai.homelab.francesco-lombardo.it`)
+                  services:
+                    - name: open-webui
+                      port: 80
+              # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
+              tls: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ai
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

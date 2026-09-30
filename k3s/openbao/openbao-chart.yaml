@@ -1,0 +1,67 @@
+---
+# OpenBao: the homelab secrets store, read by External Secrets Operator.
+# Single node with integrated Raft storage (snapshots for backups), manual Shamir
+# unseal: after every restart the pod stays sealed (not Ready) until unsealed.
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: openbao
+  namespace: kube-system
+spec:
+  repo: https://openbao.github.io/openbao-helm
+  chart: openbao
+  targetNamespace: openbao
+  createNamespace: true
+  version: 0.29.6
+  valuesContent: |-
+    injector:
+      enabled: false
+    server:
+      ha:
+        enabled: true
+        replicas: 1
+        raft:
+          enabled: true
+          setNodeId: true
+        disruptionBudget:
+          enabled: false
+      dataStorage:
+        size: 1Gi
+      resources:
+        requests:
+          cpu: 50m
+          memory: 64Mi
+        limits:
+          memory: 256Mi
+      # Kubernetes auth: OpenBao validates the ESO ServiceAccount tokens with the
+      # TokenReview API (system:auth-delegator)
+      authDelegator:
+        enabled: true
+    # The UI Service also routes to a sealed pod (publishNotReadyAddresses), so init and
+    # unseal work through the IngressRoute below
+    ui:
+      enabled: true
+    # Shipped with the release rather than as a separate manifest, so it is only
+    # applied once the openbao namespace exists.
+    extraObjects:
+      - apiVersion: traefik.io/v1alpha1
+        kind: IngressRoute
+        metadata:
+          name: openbao
+          namespace: openbao
+        spec:
+          entryPoints:
+            - websecure
+          routes:
+            - kind: Rule
+              match: Host(`bao.homelab.francesco-lombardo.it`)
+              services:
+                - name: openbao-ui
+                  port: 8200
+                  # Through the Service ClusterIP instead of the pod IPs: Traefik skips
+                  # pods that are not Ready (a sealed OpenBao never is) and would answer
+                  # 503, while kube-proxy honours the Service's publishNotReadyAddresses.
+                  # So init and unseal work through this name.
+                  nativeLB: true
+          # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
+          tls: {}

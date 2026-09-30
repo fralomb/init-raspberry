@@ -1,0 +1,41 @@
+---
+# OpenBao API, through the Traefik IngressRoute (k3s/openbao/openbao-chart.yaml). It
+# routes to the UI Service, which includes the sealed pod, so init and unseal work too.
+openbao_addr: https://bao.homelab.francesco-lombardo.it
+# Until cert-manager has issued the wildcard certificate (it needs the Cloudflare token,
+# stored in OpenBao by this very bootstrap), Traefik serves a self-signed one: run the
+# first bootstrap with -e openbao_validate_certs=false.
+openbao_validate_certs: true
+
+# Written by `init` (unseal keys + root token), read by later runs to unseal and to get
+# the token. Outside the repo on purpose. Whoever holds it can unseal OpenBao: move the
+# content to a password manager and delete the file to require the keys interactively.
+openbao_init_file: "{{ lookup('env', 'HOME') }}/.config/homelab/openbao-init.json"
+openbao_key_shares: 5
+openbao_key_threshold: 3
+
+# KV v2 engine holding the homelab secrets (paths in README)
+openbao_kv_mount: secret
+
+# ACL policies, name -> HCL
+openbao_policies:
+  external-secrets: |
+    path "secret/data/*" {
+      capabilities = ["read"]
+    }
+    path "secret/metadata/*" {
+      capabilities = ["read", "list"]
+    }
+
+# Kubernetes auth: OpenBao validates ServiceAccount tokens with the TokenReview API,
+# using its own ServiceAccount (system:auth-delegator, set by the chart).
+openbao_kubernetes_host: https://kubernetes.default.svc:443
+
+# Kubernetes auth roles, name -> role parameters
+openbao_kubernetes_roles:
+  # External Secrets Operator (ClusterSecretStore `openbao`)
+  external-secrets:
+    bound_service_account_names: [external-secrets]
+    bound_service_account_namespaces: [external-secrets]
+    token_policies: [external-secrets]
+    token_ttl: 3600

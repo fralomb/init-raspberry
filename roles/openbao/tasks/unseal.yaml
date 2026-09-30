@@ -1,0 +1,57 @@
+---
+# Unseal keys come from the init file when it exists, otherwise they are prompted for.
+
+- name: Look for the init file
+  stat:
+    path: "{{ openbao_init_file }}"
+  register: openbao_init_stat
+
+- name: Unseal with the keys from {{ openbao_init_file }}
+  uri:
+    url: "{{ openbao_addr }}/v1/sys/unseal"
+    method: PUT
+    validate_certs: "{{ openbao_validate_certs }}"
+    body_format: json
+    body:
+      key: "{{ item }}"
+  # `loop` is evaluated before `when`: no lookup unless the file exists
+  loop: >-
+    {{ (lookup('file', openbao_init_file) | from_json).keys_base64[:openbao_seal.json.t]
+       if openbao_init_stat.stat.exists else [] }}
+  changed_when: true
+  no_log: true
+
+- name: Prompt for the unseal keys
+  when: not openbao_init_stat.stat.exists
+  block:
+    - name: Enter the unseal keys
+      pause:
+        prompt: "Unseal key {{ item }} of {{ openbao_seal.json.t }}"
+        echo: false
+      loop: "{{ range(1, openbao_seal.json.t + 1) | list }}"
+      register: openbao_prompted_keys
+      no_log: true
+
+    - name: Unseal with the prompted keys
+      uri:
+        url: "{{ openbao_addr }}/v1/sys/unseal"
+        method: PUT
+        validate_certs: "{{ openbao_validate_certs }}"
+        body_format: json
+        body:
+          key: "{{ item.user_input }}"
+      loop: "{{ openbao_prompted_keys.results }}"
+      changed_when: true
+      no_log: true
+
+# 200 once unsealed and active (Raft elects the single node leader in a few seconds)
+- name: Wait for OpenBao to be unsealed and active
+  uri:
+    url: "{{ openbao_addr }}/v1/sys/health"
+    validate_certs: "{{ openbao_validate_certs }}"
+    # 503 sealed, 429 standby
+    status_code: [200, 429, 503]
+  register: openbao_health
+  until: openbao_health.status == 200
+  retries: 15
+  delay: 2

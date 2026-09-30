@@ -1,10 +1,14 @@
 ---
 # Tailnet devices reach the home LAN (and Traefik on the master) through this node.
-# Needs the tailscale.com CRDs: k3s retries it until the operator chart installs them.
+# Needs the tailscale.com CRDs from the tailscale-operator Application: applied in a
+# later wave, without dry run, and retried by the root app until they exist.
 apiVersion: tailscale.com/v1alpha1
 kind: Connector
 metadata:
   name: homelab-subnet-router
+  annotations:
+    argocd.argoproj.io/sync-wave: "1"
+    argocd.argoproj.io/sync-options: SkipDryRunOnMissingResource=true
 spec:
   hostname: homelab-subnet-router
   tags:

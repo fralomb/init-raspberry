@@ -69,6 +69,10 @@ What it does:
   `/boot/firmware/cmdline.txt`, and reboots if the kernel parameters changed. Note the
   Pi firmware injects `cgroup_disable=memory`; the appended `cgroup_enable=memory`
   comes later on the command line and wins.
+  It also sets the node's DNS servers to `common_dns_servers` (1.1.1.1, 8.8.8.8) on the
+  NetworkManager connection, instead of the router's: containerd resolves registries through
+  the node, and the router's resolver drops queries during image pulls
+  (`dial tcp: lookup ghcr.io: Try again`). Set `common_dns_servers: []` to keep the DHCP DNS.
 - **`k3s-server` role** (master): installs k3s in server mode via the official
   `get.k3s.io` script and reads the generated node token.
 - **`k3s-agent` role** (workers): installs k3s in agent mode, joining the master with
@@ -118,6 +122,90 @@ Change the destination and the name with `k3s_kubeconfig_dest` and `k3s_context_
 - `restorecon: command not found` → `sudo apt-get install policycoreutils`.
 
 ## K3s dependencies
+### Secrets (OpenBao + External Secrets)
+Secrets are kept in [OpenBao](https://openbao.org) (the open-source fork of HashiCorp Vault) and
+synced into Kubernetes Secrets by the [External Secrets Operator](https://external-secrets.io)
+(ESO). Nothing secret is committed and there are no `kubectl create secret` steps. Both are the
+first entries of `k3s_addons`, since every other component waits for a Secret from them:
+
+- [k3s/openbao/openbao-chart.yaml](k3s/openbao/openbao-chart.yaml): OpenBao, single node with
+  integrated Raft storage, UI at `https://bao.homelab.francesco-lombardo.it`.
+- [k3s/external-secrets/external-secrets-chart.yaml](k3s/external-secrets/external-secrets-chart.yaml): ESO.
+- [k3s/external-secrets/openbao-secret-store.yaml](k3s/external-secrets/openbao-secret-store.yaml): the
+  `openbao` `ClusterSecretStore`. ESO logs in with its own ServiceAccount through OpenBao's
+  Kubernetes auth, so there is no token to store.
+- One `ExternalSecret` next to each consumer (`*-secret.yaml`), reading a path under `secret/`.
+
+| OpenBao path | Keys | Kubernetes Secret |
+|---|---|---|
+| `secret/cloudflare` | `api-token` | `kube-system/cloudflare` |
+| `secret/tailscale/operator-oauth` | `client_id`, `client_secret` | `tailscale/operator-oauth` |
+| `secret/argocd/repo-init-raspberry` | `githubAppID`, `githubAppInstallationID`, `githubAppPrivateKey` | `gitops/repo-init-raspberry` |
+| `secret/open-webui` | `secret-key`, `admin-email`, `admin-password` (optional) | `ai/open-webui-secret` |
+
+#### Sealing
+OpenBao encrypts its storage with a root key that never touches the disk. At init the key is
+split into 5 **unseal keys**, any 3 of which rebuild it. After every restart (pod, node reboot,
+upgrade) OpenBao starts **sealed**: it answers nothing until 3 unseal keys are entered. The
+already synced Kubernetes Secrets are kept meanwhile, so running apps are not affected: only
+new or changed secrets wait for the unseal.
+
+#### First setup
+Once the playbook has run and the `openbao-0` pod is `Running` (not Ready: it is sealed):
+```bash
+# 1. Init, unseal, and configure the KV engine, ESO policy and Kubernetes auth role.
+#    No certificate yet: Traefik serves its self-signed one, hence the flag.
+ansible-playbook openbao.yaml -e openbao_validate_certs=false
+
+# 2. Secrets (paths and keys in the table above), with the local CLI (brew install openbao)
+export BAO_ADDR=https://bao.homelab.francesco-lombardo.it
+export BAO_SKIP_VERIFY=true                 # until the certificate is issued
+jq -r .root_token ~/.config/homelab/openbao-init.json | bao login -
+bao kv put secret/cloudflare api-token=XXX
+```
+[openbao.yaml](openbao.yaml) runs the [openbao](roles/openbao) role from the control machine
+against the OpenBao API at `https://bao.homelab.francesco-lombardo.it`. That IngressRoute points
+to the UI Service, which includes the sealed pod, so init and unseal go through it too. Each
+phase checks the current state first:
+
+1. **Init** (only if not initialised): the 5 unseal keys and the root token are written to
+   `~/.config/homelab/openbao-init.json` (mode 0600, outside the repo), not printed.
+2. **Unseal** (only if sealed): with the keys from that file or, if it does not exist, prompted for.
+3. **Configure**: KV v2 mount, policies and Kubernetes auth roles from
+   [roles/openbao/defaults/main.yaml](roles/openbao/defaults/main.yaml), writing only what differs.
+   The token is `-e openbao_token=...`, else the root token from the file, else prompted for.
+
+The same command is used after a restart (unseal) and after changing the defaults (configure):
+`ansible-playbook openbao.yaml`. `-e openbao_validate_certs=false` is only needed until the
+wildcard certificate exists.
+
+Whoever has the init file can unseal OpenBao and has the root token, which defeats splitting
+the key. Once everything works, copy the keys and token to a password manager and delete
+the file: from then on the playbook asks for them.
+
+The `bao kv put` examples in the sections below assume that shell. The UI at
+`https://bao.homelab.francesco-lombardo.it` works too.
+
+The whole sequence, from wiping the nodes to testing rotation, sealing and backups, is in
+[docs/fresh-install.md](docs/fresh-install.md).
+
+Secrets created earlier with `kubectl create secret` are taken over by their `ExternalSecret`
+(same name) at the first sync, so migrating needs no downtime.
+
+After a restart, `ansible-playbook openbao.yaml` unseals it. Check with:
+```bash
+bao status                                             # Sealed: false
+kubectl get clustersecretstore openbao                 # STATUS Valid
+kubectl get externalsecrets -A                         # STATUS SecretSynced
+```
+
+#### Backups
+Raft snapshots hold every secret, encrypted with the root key, so they are only usable with the
+unseal keys:
+```bash
+bao operator raft snapshot save bao-$(date +%F).snap
+```
+
 ### Argocd
 Installed by the `k3s-server` role through the k3s
 [auto-deploying AddOns](https://docs.k3s.io/installation/packaged-components#auto-deploying-manifests-addons):
@@ -145,6 +233,32 @@ Initial `admin` password:
 kubectl -n gitops get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d
 ```
 
+#### Applications (app of apps)
+[k3s/argocd/argocd-apps.yaml](k3s/argocd/argocd-apps.yaml), also in `k3s_addons`, is the root
+`homelab-apps` Application: Argo CD syncs every manifest under [apps/](apps) (recursively, with
+prune and self-heal), and those are the Applications of the homelab workloads. Add a workload by
+committing its manifests there, not by editing `k3s_addons`.
+
+The repo is private, so Argo CD reads it through a GitHub App. Create the App (permission
+*Contents: read-only*), install it on this repository and generate a private key (a `.pem`,
+`-----BEGIN RSA PRIVATE KEY-----`). Store it in [OpenBao](#secrets-openbao--external-secrets):
+```
+bao kv put secret/argocd/repo-init-raspberry \
+  githubAppID=<app-id> githubAppInstallationID=<installation-id> \
+  githubAppPrivateKey=@argocd-app.private-key.pem
+```
+[k3s/argocd/argocd-repo-secret.yaml](k3s/argocd/argocd-repo-secret.yaml) turns it into the
+`repo-init-raspberry` Secret in `gitops` (the only namespace Argo CD reads repository Secrets
+from), adding `type`, `url` and the `argocd.argoproj.io/secret-type: repository` label.
+Both IDs are plain numbers:
+- `githubAppID` is the **App ID** shown at the top of the App's settings page (Settings →
+  Developer settings → GitHub Apps → *app* → General). It is not the Client ID (`Iv1.…`) listed
+  just below it. With the Client ID, Argo CD fails with `strconv.ParseInt: parsing "Iv1.…"`.
+- `githubAppInstallationID` is the number at the end of the installation's settings URL
+  (`https://github.com/settings/installations/<id>`).
+
+Check with `kubectl -n gitops get applications`.
+
 ### Traefik
 k3s ships Traefik v3 as a packaged component. [k3s/traefik/traefik-config.yaml](k3s/traefik/traefik-config.yaml)
 is a `HelmChartConfig` that overrides its values (HTTP→HTTPS redirect, default TLSStore,
@@ -161,20 +275,21 @@ Cloudflare DNS-01 `Issuer` plus the wildcard `Certificate`s live in
 [k3s/cert-manager/cloudflare-issuer.yaml](k3s/cert-manager/cloudflare-issuer.yaml). Both are in
 `k3s_addons`; k3s retries the issuer file until the chart has installed the cert-manager CRDs.
 
-Create a secret containing the API token of Cloudflare in the `kube-system` namespace (where the
-`Issuer` and Traefik live):
+The Cloudflare API token (permission *Zone → DNS → Edit*) goes in
+[OpenBao](#secrets-openbao--external-secrets); [k3s/cert-manager/cloudflare-secret.yaml](k3s/cert-manager/cloudflare-secret.yaml)
+syncs it to the `cloudflare` Secret in `kube-system`, where the `Issuer` and Traefik live:
 ```
-kubectl create secret generic cloudflare --from-literal=api-token=XXX --type=Opaque --namespace kube-system
+bao kv put secret/cloudflare api-token=XXX
 ```
 
 ### Tailscale (private access)
 Nothing in the homelab is exposed to the internet: no router port forwarding, no DDNS. Remote
 access goes through [Tailscale](https://tailscale.com/kb/1236/kubernetes-operator), running in the
-cluster:
+cluster, deployed by Argo CD from [apps/tailscale/](apps/tailscale):
 
-- [k3s/tailscale/tailscale-operator-chart.yaml](k3s/tailscale/tailscale-operator-chart.yaml) installs
-  the Tailscale Kubernetes operator in the `tailscale` namespace.
-- [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml) is a `Connector` that makes the
+- [apps/tailscale/tailscale-operator.yaml](apps/tailscale/tailscale-operator.yaml) is the Application
+  installing the Tailscale Kubernetes operator chart in the `tailscale` namespace.
+- [apps/tailscale/subnet-router.yaml](apps/tailscale/subnet-router.yaml) is a `Connector` that makes the
   operator run a subnet router advertising `192.168.1.0/24`, so tailnet devices reach the LAN (and
   Traefik on the master) as if they were at home. What tailnet users can actually reach through it
   is decided by the [tailnet policy](#tailnet-policy).
@@ -191,11 +306,10 @@ One-time setup in the [Tailscale admin console](https://login.tailscale.com/admi
 2. Settings → Trust credentials: create an OAuth client with the scopes listed in the
    [operator docs](https://tailscale.com/kb/1236/kubernetes-operator#prerequisites) (`Devices Core`,
    `Auth Keys`, `Services` write) and tag `tag:k8s-operator`.
-3. Store it in the cluster (the operator pod waits for this Secret):
+3. Store it in [OpenBao](#secrets-openbao--external-secrets). The operator pod waits for the
+   `operator-oauth` Secret, synced by [apps/tailscale/operator-oauth-secret.yaml](apps/tailscale/operator-oauth-secret.yaml):
    ```
-   kubectl create namespace tailscale
-   kubectl -n tailscale create secret generic operator-oauth \
-     --from-literal=client_id=XXX --from-literal=client_secret=YYY
+   bao kv put secret/tailscale/operator-oauth client_id=XXX client_secret=YYY
    ```
 
 Check with `kubectl get connector` and `kubectl -n tailscale get pods`; the `homelab-subnet-router`
@@ -244,9 +358,126 @@ whole home network.
   `accept` destination and blocked for every `deny` one (`host:port`). Update it together with
   the grants, and change `src` if your Tailscale login differs.
 - Keep the node IPs in sync with [inventory/hosts](inventory/hosts) and the route with
-  [k3s/tailscale/subnet-router.yaml](k3s/tailscale/subnet-router.yaml).
+  [apps/tailscale/subnet-router.yaml](apps/tailscale/subnet-router.yaml).
 - Add back an `ssh` section only if you use Tailscale SSH; plain SSH through the subnet route uses
   the `tcp:22` grant.
+
+## Local AI models
+[Ollama](https://ollama.com) serves the models and [Open WebUI](https://docs.openwebui.com) is
+the chat UI and API in front of it, both deployed by Argo CD from [apps/ai/](apps/ai):
+
+| | Node | Exposed |
+|---|---|---|
+| Ollama ([apps/ai/ollama.yaml](apps/ai/ollama.yaml)) | Pi 5 (8 GB): label + taint `homelab/ai=true` | no: ClusterIP only, it has no authentication |
+| Open WebUI ([apps/ai/open-webui.yaml](apps/ai/open-webui.yaml)) | master (the Pi 5 is tainted) | `https://ai.homelab.francesco-lombardo.it` |
+
+Inference runs on the CPU (llama.cpp), so stick to small quantized models. On the Pi 5,
+`qwen3:1.7b`/`gemma3:1b` answer quickly and `qwen3:4b`/`gemma3:4b`/`llama3.2:3b` are better
+but slower (a few tokens/s); 7–8B models fit but crawl. `gemma4:e2b` (~7.2 GB despite its 2B
+effective parameters) is the largest that loads; `gemma4:e4b` (~9.6 GB) does not fit in 8 GB.
+Ollama keeps one model in memory at a time (`OLLAMA_MAX_LOADED_MODELS=1`), with a 4096-token
+context (`OLLAMA_CONTEXT_LENGTH`), and is capped at 7.5 GiB, so a model too large is OOM-killed
+instead of starving the node. With `gemma4:e2b` loaded, little memory is left on the Pi 5.
+
+### USB SSD for the model weights
+Models are GBs each: they live on a USB SSD on the Pi 5, not on the SD card. The disk is
+formatted **ext4** (the container needs POSIX ownership; exFAT/NTFS don't have it). Formatting is
+a one-time manual step since it wipes the disk:
+```bash
+lsblk -f                              # find the SSD, e.g. /dev/sda
+sudo wipefs -a /dev/sda
+sudo parted -s /dev/sda mklabel gpt mkpart ssd ext4 0% 100%
+sudo mkfs.ext4 -L ssd /dev/sda1
+```
+The `ssd-storage` role mounts it for hosts with `ssd_storage: true`
+([host_vars/k3s-worker-1.yaml](host_vars/k3s-worker-1.yaml)): `LABEL=ssd` on `/mnt/ssd` via
+fstab, with `nofail` so the Pi still boots without the disk, and creates `/mnt/ssd/ollama`. If
+the disk is already mounted elsewhere or has another label, set `ssd_mount`/`ssd_label` there
+(defaults in [roles/ssd-storage/defaults/main.yaml](roles/ssd-storage/defaults/main.yaml)).
+It uses the `ansible.posix` collection, part of the full `ansible` package; with `ansible-core`
+only, run `ansible-galaxy collection install -r requirements.yml`.
+
+[apps/ai/storage.yaml](apps/ai/storage.yaml) turns that directory into a `local` PersistentVolume
+bound to the `homelab/ai=true` node, which also pins Ollama there.
+
+### Node label and taint
+The Pi 5 is reserved for the models, with two settings in
+[host_vars/k3s-worker-1.yaml](host_vars/k3s-worker-1.yaml):
+- label `homelab/ai=true` (`k3s_node_labels`): Ollama's `nodeSelector` and the SSD
+  PersistentVolume select the node by it.
+- taint `homelab/ai=true:NoSchedule` (`k3s_node_taints`): no pod is scheduled there unless it
+  tolerates the taint. Only Ollama and the per-node DaemonSets do; everything else runs on the
+  master.
+
+Per-node workloads (DaemonSets) must run on the Pi 5 too, so they get a toleration:
+```yaml
+tolerations:
+  - key: homelab/ai
+    operator: Exists
+    effect: NoSchedule
+```
+Today the only one is k3s's ServiceLB (`svclb-traefik`, exposing Traefik on every node). k3s adds
+the tolerations from the `svccontroller.k3s.cattle.io/tolerations` annotation on the Traefik
+Service, set in [k3s/traefik/traefik-config.yaml](k3s/traefik/traefik-config.yaml). Flannel and
+kube-proxy run inside the k3s binary, not as pods, so the taint does not affect them.
+
+The last play of `playbook.yaml` applies both (the node name is the inventory hostname, which
+must match the Pi's hostname). The taint does not evict pods already running on the node: they
+move at their next restart. By hand:
+```
+kubectl label node k3s-worker-1 homelab/ai=true
+kubectl taint node k3s-worker-1 homelab/ai=true:NoSchedule
+```
+
+### Models
+The models in `ollama.models.pull` are downloaded at pod start when missing from the SSD
+(`nomic-embed-text` is the embedding model Open WebUI uses for documents). Pull others through
+the UI (Admin settings → Models) or:
+```
+kubectl -n ai exec deploy/ollama -- ollama pull gemma3:4b
+kubectl -n ai exec deploy/ollama -- ollama list
+```
+
+### Open WebUI
+Open WebUI reaches Ollama through `OLLAMA_BASE_URLS` (`ollamaUrls` in the chart values), so the
+pulled models show up in the model picker with nothing to set in the UI. Admin settings →
+Connections shows the in-cluster URL.
+
+Its settings are declared in [apps/ai/open-webui.yaml](apps/ai/open-webui.yaml) and git wins:
+`ENABLE_PERSISTENT_CONFIG=False` re-applies them on every start, so a change made in Admin
+settings lasts until the next restart unless it is copied into the values. Users, chats and model
+presets are stored in the database and are kept. Configured there:
+sign-ups disabled, API keys enabled, `qwen3:1.7b` as default and task model (titles, tags), and
+document embeddings through Ollama (`nomic-embed-text`).
+
+What can't be committed lives in [OpenBao](#secrets-openbao--external-secrets) at
+`secret/open-webui`, synced to the `open-webui-secret` Secret by an `ExternalSecret` shipped with
+the chart (`extraResources`). All its keys are optional:
+- `secret-key` signs the login sessions. Without it, a random key is generated at every start and
+  everyone is logged out on restart.
+- `admin-email` / `admin-password` create the admin account at start if no user exists yet.
+  Without them, the first account created in the UI becomes the admin (sign-ups stay disabled
+  for everyone after that).
+```
+bao kv put secret/open-webui secret-key=$(openssl rand -hex 32) \
+  admin-email=<email> admin-password=<password>
+kubectl -n ai rollout restart statefulset open-webui   # env vars are read at start
+```
+
+OpenAI-compatible API for scripts, editors and agents: create a key in Settings → Account → API
+keys, then use `https://ai.homelab.francesco-lombardo.it/api` as base URL:
+```
+curl https://ai.homelab.francesco-lombardo.it/api/chat/completions \
+  -H "Authorization: Bearer $OPENWEBUI_API_KEY" -H 'Content-Type: application/json' \
+  -d '{"model": "qwen3:1.7b", "messages": [{"role": "user", "content": "hello"}]}'
+```
+
+Check the deployment:
+```
+kubectl -n gitops get applications
+kubectl -n ai get pods,pvc -o wide
+kubectl -n ai logs deploy/ollama
+```
 
 ## Extras
 

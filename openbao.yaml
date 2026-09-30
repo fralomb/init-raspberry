@@ -1,0 +1,18 @@
+---
+# OpenBao bootstrap, run from the control machine against its API
+# (https://bao.homelab.francesco-lombardo.it), once the playbook has installed it:
+#   1. init (first run only): unseal keys + root token saved to openbao_init_file
+#   2. unseal, when sealed (after every restart): keys from that file, or prompted
+#   3. KV engine, policies and Kubernetes auth for External Secrets
+# Each step checks the current state first, so the same command works on a fresh
+# cluster, after a reboot, and after changing roles/openbao/defaults/main.yaml.
+#
+#   ansible-playbook openbao.yaml                                  # usual
+#   ansible-playbook openbao.yaml -e openbao_validate_certs=false  # before the certificate exists
+
+- name: Bootstrap OpenBao
+  hosts: localhost
+  connection: local
+  gather_facts: no
+  roles:
+    - role: openbao
