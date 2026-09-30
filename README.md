@@ -373,9 +373,11 @@ the chat UI and API in front of it, both deployed by Argo CD from [apps/ai/](app
 
 Inference runs on the CPU (llama.cpp), so stick to small quantized models. On the Pi 5,
 `qwen3:1.7b`/`gemma3:1b` answer quickly and `qwen3:4b`/`gemma3:4b`/`llama3.2:3b` are better
-but slower (a few tokens/s); 7–8B models fit but crawl. Ollama keeps one model in memory at a
-time (`OLLAMA_MAX_LOADED_MODELS=1`) and is capped at 6 GiB, so a model too large is OOM-killed
-instead of starving the node.
+but slower (a few tokens/s); 7–8B models fit but crawl. `gemma4:e2b` (~7.2 GB despite its 2B
+effective parameters) is the largest that loads; `gemma4:e4b` (~9.6 GB) does not fit in 8 GB.
+Ollama keeps one model in memory at a time (`OLLAMA_MAX_LOADED_MODELS=1`), with a 4096-token
+context (`OLLAMA_CONTEXT_LENGTH`), and is capped at 7.5 GiB, so a model too large is OOM-killed
+instead of starving the node. With `gemma4:e2b` loaded, little memory is left on the Pi 5.
 
 ### USB SSD for the model weights
 Models are GBs each: they live on a USB SSD on the Pi 5, not on the SD card. The disk is
