@@ -115,6 +115,8 @@ In the admin console, `homelab-k8s-operator` and `homelab-subnet-router` show up
 `https://argocd.homelab.francesco-lombardo.it` loads.
 
 ## 8. Local AI
+> **Disabled**: `apps/ai` is commented out, skip this step (and the `secret/open-webui` and taint checks above).
+
 ```bash
 kubectl -n ai get pods,pvc -o wide        # ollama on k3s-worker-1, open-webui on k3s-master
 kubectl -n ai get externalsecret open-webui-secret        # SecretSynced

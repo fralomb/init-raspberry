@@ -363,6 +363,9 @@ whole home network.
   the `tcp:22` grant.
 
 ## Local AI models
+> **Disabled**: the manifests in [apps/ai/](apps/ai), `k3s_node_taints` and the taint tasks in
+> `playbook.yaml` are commented out. Uncomment them to restore what follows.
+
 [Ollama](https://ollama.com) serves the models and [Open WebUI](https://docs.openwebui.com) is
 the chat UI and API in front of it, both deployed by Argo CD from [apps/ai/](apps/ai):
 

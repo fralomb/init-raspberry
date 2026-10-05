@@ -1,80 +1,81 @@
----
-# Ollama (llama.cpp, CPU only) on the Pi 5. No authentication: ClusterIP only, reached
-# by Open WebUI in-cluster. Clients outside the cluster go through Open WebUI's API.
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: ollama
-  namespace: gitops
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
-spec:
-  project: default
-  source:
-    repoURL: https://otwld.github.io/ollama-helm/
-    chart: ollama
-    targetRevision: 1.83.0
-    helm:
-      releaseName: ollama
-      valuesObject:
-        ollama:
-          gpu:
-            enabled: false
-          models:
-            # Pulled at pod start when missing from the SSD. Q4 models that fit the
-            # Pi 5 memory: ~2.5 GB (qwen3:4b), ~1.4 GB (qwen3:1.7b) and ~7.2 GB
-            # (gemma4:e2b: per-layer embeddings and vision encoder make it much
-            # larger than its 2B effective parameters; gemma4:e4b, ~9.6 GB, does not
-            # fit the 8 GB Pi at all). nomic-embed-text is the embedding model Open
-            # WebUI uses for documents (RAG).
-            pull:
-              - qwen3:4b
-              - qwen3:1.7b
-              - gemma4:e2b
-              - nomic-embed-text
-        extraEnv:
-          # One request, one model in memory at a time: the Pi has 8 GB in total
-          - name: OLLAMA_NUM_PARALLEL
-            value: "1"
-          - name: OLLAMA_MAX_LOADED_MODELS
-            value: "1"
-          - name: OLLAMA_KEEP_ALIVE
-            value: 30m
-          # Caps the KV cache: the models support up to 128K tokens, which would not
-          # fit next to gemma4:e2b's weights
-          - name: OLLAMA_CONTEXT_LENGTH
-            value: "4096"
-        persistentVolume:
-          enabled: true
-          storageClass: local-ssd
-          volumeName: ollama-models
-          size: 60Gi
-        # The Pi 5: the label brings Ollama there, the toleration lets it past the
-        # taint that keeps every other pod off that node
-        nodeSelector:
-          homelab/ai: "true"
-        tolerations:
-          - key: homelab/ai
-            operator: Equal
-            value: "true"
-            effect: NoSchedule
-        resources:
-          requests:
-            cpu: "1"
-            memory: 3Gi
-          # A model too large for the node gets OOM-killed instead of starving it.
-          # 7.5Gi for gemma4:e2b: while it is loaded, only ~0.5 GB of the Pi 5's 8 GB
-          # is left for the OS and k3s.
-          limits:
-            memory: 7.5Gi
-        tests:
-          enabled: false
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: ai
-  syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
+# Disabled: the AI stack is undeployed (Argo CD prunes it). Uncomment to restore.
+# ---
+# # Ollama (llama.cpp, CPU only) on the Pi 5. No authentication: ClusterIP only, reached
+# # by Open WebUI in-cluster. Clients outside the cluster go through Open WebUI's API.
+# apiVersion: argoproj.io/v1alpha1
+# kind: Application
+# metadata:
+#   name: ollama
+#   namespace: gitops
+#   finalizers:
+#     - resources-finalizer.argocd.argoproj.io
+# spec:
+#   project: default
+#   source:
+#     repoURL: https://otwld.github.io/ollama-helm/
+#     chart: ollama
+#     targetRevision: 1.83.0
+#     helm:
+#       releaseName: ollama
+#       valuesObject:
+#         ollama:
+#           gpu:
+#             enabled: false
+#           models:
+#             # Pulled at pod start when missing from the SSD. Q4 models that fit the
+#             # Pi 5 memory: ~2.5 GB (qwen3:4b), ~1.4 GB (qwen3:1.7b) and ~7.2 GB
+#             # (gemma4:e2b: per-layer embeddings and vision encoder make it much
+#             # larger than its 2B effective parameters; gemma4:e4b, ~9.6 GB, does not
+#             # fit the 8 GB Pi at all). nomic-embed-text is the embedding model Open
+#             # WebUI uses for documents (RAG).
+#             pull:
+#               - qwen3:4b
+#               - qwen3:1.7b
+#               - gemma4:e2b
+#               - nomic-embed-text
+#         extraEnv:
+#           # One request, one model in memory at a time: the Pi has 8 GB in total
+#           - name: OLLAMA_NUM_PARALLEL
+#             value: "1"
+#           - name: OLLAMA_MAX_LOADED_MODELS
+#             value: "1"
+#           - name: OLLAMA_KEEP_ALIVE
+#             value: 30m
+#           # Caps the KV cache: the models support up to 128K tokens, which would not
+#           # fit next to gemma4:e2b's weights
+#           - name: OLLAMA_CONTEXT_LENGTH
+#             value: "4096"
+#         persistentVolume:
+#           enabled: true
+#           storageClass: local-ssd
+#           volumeName: ollama-models
+#           size: 60Gi
+#         # The Pi 5: the label brings Ollama there, the toleration lets it past the
+#         # taint that keeps every other pod off that node
+#         nodeSelector:
+#           homelab/ai: "true"
+#         tolerations:
+#           - key: homelab/ai
+#             operator: Equal
+#             value: "true"
+#             effect: NoSchedule
+#         resources:
+#           requests:
+#             cpu: "1"
+#             memory: 3Gi
+#           # A model too large for the node gets OOM-killed instead of starving it.
+#           # 7.5Gi for gemma4:e2b: while it is loaded, only ~0.5 GB of the Pi 5's 8 GB
+#           # is left for the OS and k3s.
+#           limits:
+#             memory: 7.5Gi
+#         tests:
+#           enabled: false
+#   destination:
+#     server: https://kubernetes.default.svc
+#     namespace: ai
+#   syncPolicy:
+#     automated:
+#       prune: true
+#       selfHeal: true
+#     syncOptions:
+#       - CreateNamespace=true

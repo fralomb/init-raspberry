@@ -45,19 +45,20 @@
       retries: 12
       delay: 10
 
-    # Only adds the taints listed in k3s_node_taints (key=value:Effect); removing one
-    # from the list does not remove it from the node: `kubectl taint node <n> <key>-`
-    - name: Read the current taints
-      command: >-
-        k3s kubectl get node {{ inventory_hostname }}
-        -o jsonpath='{range .spec.taints[*]}{.key}={.value}:{.effect}{"\n"}{end}'
-      delegate_to: "{{ groups['master'][0] }}"
-      when: k3s_node_taints is defined
-      register: k3s_taints_current
-      changed_when: false
-
-    - name: Apply k3s_node_taints from the host vars
-      command: k3s kubectl taint node {{ inventory_hostname }} {{ item }}
-      delegate_to: "{{ groups['master'][0] }}"
-      loop: "{{ k3s_node_taints | default([]) }}"
-      when: item not in k3s_taints_current.stdout_lines | default([])
+    # Disabled: no node is tainted for now. Uncomment to restore.
+    # # Only adds the taints listed in k3s_node_taints (key=value:Effect); removing one
+    # # from the list does not remove it from the node: `kubectl taint node <n> <key>-`
+    # - name: Read the current taints
+    #   command: >-
+    #     k3s kubectl get node {{ inventory_hostname }}
+    #     -o jsonpath='{range .spec.taints[*]}{.key}={.value}:{.effect}{"\n"}{end}'
+    #   delegate_to: "{{ groups['master'][0] }}"
+    #   when: k3s_node_taints is defined
+    #   register: k3s_taints_current
+    #   changed_when: false
+    #
+    # - name: Apply k3s_node_taints from the host vars
+    #   command: k3s kubectl taint node {{ inventory_hostname }} {{ item }}
+    #   delegate_to: "{{ groups['master'][0] }}"
+    #   loop: "{{ k3s_node_taints | default([]) }}"
+    #   when: item not in k3s_taints_current.stdout_lines | default([])
