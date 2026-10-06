@@ -119,8 +119,9 @@ In the admin console, `homelab-k8s-operator` and `homelab-subnet-router` show up
 ## 8. Pi-hole
 ```bash
 kubectl -n pihole get externalsecret pihole-admin         # SecretSynced
-kubectl -n pihole get pods -o wide                        # pihole Running on k3s-master
+kubectl -n pihole get pods -o wide                        # 2 pihole pods, one per node
 dig @192.168.1.16 doubleclick.net +short                  # 0.0.0.0
+dig @192.168.1.15 doubleclick.net +short                  # 0.0.0.0
 ```
 `https://pihole.homelab.francesco-lombardo.it` opens the admin UI; log in with `secret/pihole`.
 

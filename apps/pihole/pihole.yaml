@@ -1,6 +1,8 @@
 ---
 # Pi-hole: network-wide DNS ad blocker for the LAN and the tailnet.
-# - DNS: k3s ServiceLB exposes port 53 (TCP + UDP) on the master's LAN IP, 192.168.1.16.
+# - HA: two stateless replicas, one per node. All config is in the values below (Git is the
+#   source of truth): /etc/pihole is an emptyDir and gravity is rebuilt at every start.
+# - DNS: k3s ServiceLB exposes port 53 (TCP + UDP) on every node: 192.168.1.16 and 192.168.1.15.
 # - Web UI: https://pihole.homelab.francesco-lombardo.it/admin through Traefik.
 # - Admin password: OpenBao secret/pihole (key `password`), synced by the ExternalSecret below.
 apiVersion: argoproj.io/v1alpha1
@@ -19,15 +21,29 @@ spec:
     helm:
       releaseName: pihole
       valuesObject:
-        # One pod writing the gravity/FTL databases on a ReadWriteOnce volume: stop the old
-        # pod before starting the new one.
-        strategyType: Recreate
+        # One replica per node (required anti-affinity), replaced one at a time: the new pod
+        # takes the old one's node, so no surge, and the next waits for it to be Ready.
+        replicaCount: 2
+        strategyType: RollingUpdate
+        maxSurge: 0
+        maxUnavailable: 1
+        antiaff:
+          enabled: true
+          avoidRelease: pihole
+          strict: true
+        # Voluntary disruptions (node drain) keep one replica answering
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
+        # A replica on the AI node too, should its taint be re-enabled
+        tolerations:
+          - key: homelab/ai
+            operator: Exists
+            effect: NoSchedule
         virtualHost: pihole.homelab.francesco-lombardo.it
-        # Pinned to the master: with externalTrafficPolicy Local only the node running the
-        # pod answers on :53, and that has to be the IP handed out as DNS server. Local also
-        # keeps the real client IPs in the query log instead of the svclb pod's.
-        nodeSelector:
-          node-role.kubernetes.io/control-plane: "true"
+        # externalTrafficPolicy Local: each node's IP answers through its own replica, keeping
+        # the real client IPs in the query log (Cluster would SNAT them to a node IP). While a
+        # replica restarts its node IP is silent and clients retry on the other DNS server.
         serviceDns:
           type: LoadBalancer
           mixedService: true
@@ -44,15 +60,20 @@ spec:
           type: ClusterIP
           https:
             enabled: false
+        # No PVC: each replica keeps its gravity and query databases in an emptyDir. Query
+        # history and stats are per replica and reset on restart; UI changes are not kept.
         persistentVolumeClaim:
-          enabled: true
-          size: 1Gi
+          enabled: false
         admin:
           existingSecret: pihole-admin
           passwordKey: password
         # Same resolvers as common_dns_servers on the nodes
         DNS1: 1.1.1.1
         DNS2: 1.0.0.1
+        # Blocklists, imported into gravity at every start. Allow/deny entries go in
+        # whitelist / blacklist / regex the same way.
+        adlists:
+          - https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
         dnsmasq:
           # Homelab names answered locally: they keep working without internet and are
           # not dropped by the router's DNS rebinding protection.
@@ -112,6 +133,12 @@ spec:
                   services:
                     - name: pihole-web
                       port: 80
+                      # Login sessions live in each replica's memory: stick to one
+                      sticky:
+                        cookie:
+                          name: pihole_affinity
+                          secure: true
+                          httpOnly: true
               # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
               tls: {}
   destination:

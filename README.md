@@ -337,8 +337,8 @@ whole home network.
     { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"] },
     // Homelab services through Traefik on the master
     { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:443", "tcp:80"] },
-    // Pi-hole DNS on the master
-    { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["udp:53", "tcp:53"] },
+    // Pi-hole DNS, one replica per node
+    { "src": ["autogroup:member"], "dst": ["192.168.1.15/32", "192.168.1.16/32"], "ip": ["udp:53", "tcp:53"] },
     // SSH to the k3s nodes (master + worker) and the Kubernetes API
     { "src": ["autogroup:member"], "dst": ["192.168.1.15/32", "192.168.1.16/32"], "ip": ["tcp:22"] },
     { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:6443"] }
@@ -369,22 +369,26 @@ whole home network.
 [apps/pihole/pihole.yaml](apps/pihole/pihole.yaml) is the Argo CD Application installing the
 [Pi-hole chart](https://github.com/MoJo2600/pihole-kubernetes) in the `pihole` namespace:
 
-- **DNS** on port 53 (TCP + UDP) of the master, `192.168.1.16`: a `LoadBalancer` Service served by
-  k3s's ServiceLB. The pod is pinned to the master and the Service uses
-  `externalTrafficPolicy: Local`, so the query log shows the real client IPs (the worker's svclb
-  pod listens too, but drops the traffic: no Pi-hole pod there).
+- **HA**: two replicas, one per node (required anti-affinity, a PDB with `minAvailable: 1`).
+  Rolling updates replace one pod at a time and wait for it to be Ready before the next.
+- **DNS** on port 53 (TCP + UDP) of both nodes, `192.168.1.16` and `192.168.1.15`: a `LoadBalancer`
+  Service served by k3s's ServiceLB. With `externalTrafficPolicy: Local` each node IP answers
+  through its own replica, so the query log shows the real client IPs. While a replica restarts its
+  node IP does not answer and clients retry on the other DNS server: hand out **both**.
+- **Stateless, config in Git**: `/etc/pihole` is an `emptyDir` and gravity is rebuilt at every
+  start. Blocklists (`adlists`), allow/deny lists (`whitelist`, `blacklist`, `regex`), upstreams and
+  local records are all in the Application values: change them there, not in the UI. Changes
+  made in the UI, query history and stats are per replica and lost on restart.
 - **Upstreams** `1.1.1.1` and `1.0.0.1`. `*.homelab.francesco-lombardo.it` is answered locally with
   `192.168.1.16`, so homelab names resolve without internet and skip the router's DNS rebinding
   protection.
 - **Web UI** at `https://pihole.homelab.francesco-lombardo.it` (redirects to `/admin/`), through
-  Traefik and the wildcard certificate.
-- **State** (`/etc/pihole`: gravity database, lists, settings changed in the UI) on a 1 Gi
-  `local-path` PVC on the master. Changes made in the UI survive restarts; the values in the
-  Application (upstreams, listening mode, local records) are re-applied at every start.
+  Traefik and the wildcard certificate. A sticky cookie keeps the browser on one replica, since
+  login sessions are per replica; the dashboard shows that replica's stats only.
 - DHCP stays on the router.
 
 The admin password comes from [OpenBao](#secrets-openbao--external-secrets), synced to the
-`pihole-admin` Secret by an `ExternalSecret` shipped with the Application. The pod waits for it:
+`pihole-admin` Secret by an `ExternalSecret` shipped with the Application. The pods wait for it:
 ```
 bao kv put secret/pihole password=$(openssl rand -base64 24)
 ```
@@ -393,16 +397,16 @@ Check with:
 ```
 kubectl -n pihole get pods,svc,externalsecret
 dig @192.168.1.16 doubleclick.net +short          # 0.0.0.0: blocked
+dig @192.168.1.15 doubleclick.net +short          # same, from the other replica
 dig @192.168.1.16 argocd.homelab.francesco-lombardo.it +short   # 192.168.1.16
 ```
 
 Then use it:
-- **LAN**: in the router's DHCP settings set `192.168.1.16` as the only DNS server. A second public
-  resolver would bypass the blocking for part of the queries. Pi-hole runs on the cluster: if the
-  master is down, so is name resolution on the LAN, so keep the router's own settings at hand.
+- **LAN**: in the router's DHCP settings set `192.168.1.16` and `192.168.1.15` as the DNS servers,
+  and nothing else: a public resolver next to them would bypass the blocking for part of the queries.
 - **Tailnet**: admin console → DNS → Nameservers → *Add nameserver* → *Custom* → `192.168.1.16`,
-  and enable *Override DNS servers*. Tailnet devices reach it through the subnet router, allowed by
-  the `udp:53`/`tcp:53` grant in the [tailnet policy](#tailnet-policy).
+  again for `192.168.1.15`, and enable *Override DNS servers*. Tailnet devices reach them through
+  the subnet router, allowed by the `udp:53`/`tcp:53` grant in the [tailnet policy](#tailnet-policy).
 
 ## Local AI models
 > **Disabled**: the manifests in [apps/ai/](apps/ai), `k3s_node_taints` and the taint tasks in
