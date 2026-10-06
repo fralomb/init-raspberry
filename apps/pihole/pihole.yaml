@@ -1,0 +1,146 @@
+---
+# Pi-hole: network-wide DNS ad blocker for the LAN and the tailnet.
+# - HA: two stateless replicas, one per node. All config is in the values below (Git is the
+#   source of truth): /etc/pihole is an emptyDir and gravity is rebuilt at every start.
+# - DNS: k3s ServiceLB exposes port 53 (TCP + UDP) on every node: 192.168.1.16 and 192.168.1.15.
+# - Web UI: https://pihole.homelab.francesco-lombardo.it/admin through Traefik.
+# - Admin password: OpenBao secret/pihole (key `password`), synced by the ExternalSecret below.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pihole
+  namespace: gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://mojo2600.github.io/pihole-kubernetes/
+    chart: pihole
+    targetRevision: 2.38.0
+    helm:
+      releaseName: pihole
+      valuesObject:
+        # One replica per node (required anti-affinity), replaced one at a time: the new pod
+        # takes the old one's node, so no surge, and the next waits for it to be Ready.
+        replicaCount: 2
+        strategyType: RollingUpdate
+        maxSurge: 0
+        maxUnavailable: 1
+        antiaff:
+          enabled: true
+          avoidRelease: pihole
+          strict: true
+        # Voluntary disruptions (node drain) keep one replica answering
+        podDisruptionBudget:
+          enabled: true
+          minAvailable: 1
+        virtualHost: pihole.homelab.francesco-lombardo.it
+        # externalTrafficPolicy Local: each node's IP answers through its own replica, keeping
+        # the real client IPs in the query log (Cluster would SNAT them to a node IP). While a
+        # replica restarts its node IP is silent and clients retry on the other DNS server.
+        serviceDns:
+          type: LoadBalancer
+          mixedService: true
+          externalTrafficPolicy: Local
+        # DHCP stays on the router
+        serviceDhcp:
+          enabled: false
+        # TLS is terminated by Traefik
+        serviceWeb:
+          type: ClusterIP
+          https:
+            enabled: false
+        # No PVC: each replica keeps its gravity and query databases in an emptyDir. Query
+        # history and stats are per replica and reset on restart; UI changes are not kept.
+        persistentVolumeClaim:
+          enabled: false
+        admin:
+          existingSecret: pihole-admin
+          passwordKey: password
+        # Upstreams: Cloudflare and Google. DNS1/DNS2 only take two, so they are blanked
+        # and the whole list goes to FTLCONF_dns_upstreams through `ftl` below.
+        DNS1: ""
+        DNS2: ""
+        ftl:
+          dns_upstreams: 1.1.1.1;1.0.0.1;8.8.8.8;8.8.4.4
+        # Blocklists, imported into gravity at every start. Allow/deny entries go in
+        # whitelist / blacklist / regex the same way.
+        adlists:
+          - https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+        dnsmasq:
+          # Homelab names answered locally: they keep working without internet and are
+          # not dropped by the router's DNS rebinding protection.
+          customDnsEntries:
+            - address=/homelab.francesco-lombardo.it/192.168.1.16
+        extraEnvVars:
+          # Answer queries from every network (LAN, tailnet via the subnet router), not
+          # only the pod's own subnet
+          FTLCONF_dns_listeningMode: all
+          TZ: Europe/Rome
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        extraObjects:
+          # password from OpenBao secret/pihole
+          - apiVersion: external-secrets.io/v1
+            kind: ExternalSecret
+            metadata:
+              name: pihole-admin
+              namespace: pihole
+            spec:
+              refreshInterval: 1h
+              secretStoreRef:
+                kind: ClusterSecretStore
+                name: openbao
+              target:
+                name: pihole-admin
+              dataFrom:
+                - extract:
+                    key: pihole
+          # The UI lives under /admin: send the bare host there
+          - apiVersion: traefik.io/v1alpha1
+            kind: Middleware
+            metadata:
+              name: pihole-admin-redirect
+              namespace: pihole
+            spec:
+              redirectRegex:
+                regex: ^https://([^/]+)/?$
+                replacement: https://${1}/admin/
+          - apiVersion: traefik.io/v1alpha1
+            kind: IngressRoute
+            metadata:
+              name: pihole
+              namespace: pihole
+            spec:
+              entryPoints:
+                - websecure
+              routes:
+                - kind: Rule
+                  match: Host(`pihole.homelab.francesco-lombardo.it`)
+                  middlewares:
+                    - name: pihole-admin-redirect
+                  services:
+                    - name: pihole-web
+                      port: 80
+                      # Login sessions live in each replica's memory: stick to one
+                      sticky:
+                        cookie:
+                          name: pihole_affinity
+                          secure: true
+                          httpOnly: true
+              # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
+              tls: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pihole
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
