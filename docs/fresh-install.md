@@ -8,10 +8,11 @@ Rebuild the cluster from scratch and check that every secret flows from OpenBao:
 | `secret/argocd/repo-init-raspberry` | `gitops/repo-init-raspberry` | Argo CD repo access | k3s addon |
 | `secret/tailscale/operator-oauth` | `tailscale/operator-oauth` | Tailscale operator | Argo CD (`apps/tailscale`) |
 | `secret/open-webui` | `ai/open-webui-secret` | Open WebUI | Argo CD (`apps/ai`) |
+| `secret/pihole` | `pihole/pihole-admin` | Pi-hole admin password | Argo CD (`apps/pihole`) |
 
 Bootstrap order: k3s addons (OpenBao, ESO, cert-manager, Argo CD) → `openbao.yaml` (init, unseal, configure) →
 secrets in OpenBao → ESO syncs → certificates and Argo CD repo access → Argo CD deploys
-Tailscale and the AI stack.
+Tailscale, Pi-hole and the AI stack.
 
 ## 0. Before you start
 - On the control machine: `ansible`, `kubectl`, and the OpenBao CLI
@@ -74,8 +75,9 @@ bao kv put secret/argocd/repo-init-raspberry \
   githubAppPrivateKey=@/path/to/app.private-key.pem
 bao kv put secret/open-webui secret-key=$(openssl rand -hex 32) \
   admin-email=<email> admin-password=<password>
+bao kv put secret/pihole password=<password>
 
-bao kv list secret/                                   # argocd/ cloudflare open-webui tailscale/
+bao kv list secret/                                   # argocd/ cloudflare open-webui pihole tailscale/
 ```
 
 ## 5. Bootstrap secrets synced
@@ -98,7 +100,7 @@ serve a valid certificate: `unset BAO_SKIP_VERIFY`, and from now on run `openbao
 kubectl -n gitops patch application homelab-apps --type merge \
   -p '{"spec":{"source":{"targetRevision":"claude/dazzling-keller-oao382"}}}'
 kubectl -n gitops get applications -w
-#   homelab-apps, tailscale-operator, ollama, open-webui → Synced / Healthy
+#   homelab-apps, tailscale-operator, pihole, ollama, open-webui → Synced / Healthy
 ```
 While the Tailscale CRDs are installing, the root app briefly shows a failed sync for the
 `Connector`; its retry settles it. Argo CD UI admin password:
@@ -114,7 +116,15 @@ In the admin console, `homelab-k8s-operator` and `homelab-subnet-router` show up
 `192.168.1.0/24` route is auto-approved. Test from a phone on mobile data with Tailscale on:
 `https://argocd.homelab.francesco-lombardo.it` loads.
 
-## 8. Local AI
+## 8. Pi-hole
+```bash
+kubectl -n pihole get externalsecret pihole-admin         # SecretSynced
+kubectl -n pihole get pods -o wide                        # pihole Running on k3s-master
+dig @192.168.1.16 doubleclick.net +short                  # 0.0.0.0
+```
+`https://pihole.homelab.francesco-lombardo.it` opens the admin UI; log in with `secret/pihole`.
+
+## 9. Local AI
 > **Disabled**: `apps/ai` is commented out, skip this step (and the `secret/open-webui` and taint checks above).
 
 ```bash
@@ -136,7 +146,7 @@ curl https://ai.homelab.francesco-lombardo.it/api/chat/completions \
   -d '{"model": "qwen3:1.7b", "messages": [{"role": "user", "content": "hello"}]}'
 ```
 
-## 9. OpenBao scenarios
+## 10. OpenBao scenarios
 **Rotation.** A change in OpenBao reaches the Secret:
 ```bash
 bao kv patch secret/open-webui secret-key=$(openssl rand -hex 32)
@@ -169,7 +179,7 @@ bao operator raft snapshot restore bao-<date>.snap
 ```
 The snapshot is encrypted and only usable with the unseal keys.
 
-## 10. Finish
+## 11. Finish
 - Create a personal login instead of the root token, then revoke it:
   ```bash
   bao auth enable userpass

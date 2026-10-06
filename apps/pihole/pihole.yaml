@@ -1,0 +1,125 @@
+---
+# Pi-hole: network-wide DNS ad blocker for the LAN and the tailnet.
+# - DNS: k3s ServiceLB exposes port 53 (TCP + UDP) on the master's LAN IP, 192.168.1.16.
+# - Web UI: https://pihole.homelab.francesco-lombardo.it/admin through Traefik.
+# - Admin password: OpenBao secret/pihole (key `password`), synced by the ExternalSecret below.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: pihole
+  namespace: gitops
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://mojo2600.github.io/pihole-kubernetes/
+    chart: pihole
+    targetRevision: 2.38.0
+    helm:
+      releaseName: pihole
+      valuesObject:
+        # One pod writing the gravity/FTL databases on a ReadWriteOnce volume: stop the old
+        # pod before starting the new one.
+        strategyType: Recreate
+        virtualHost: pihole.homelab.francesco-lombardo.it
+        # Pinned to the master: with externalTrafficPolicy Local only the node running the
+        # pod answers on :53, and that has to be the IP handed out as DNS server. Local also
+        # keeps the real client IPs in the query log instead of the svclb pod's.
+        nodeSelector:
+          node-role.kubernetes.io/control-plane: "true"
+        serviceDns:
+          type: LoadBalancer
+          mixedService: true
+          externalTrafficPolicy: Local
+          annotations:
+            # The svclb DaemonSet must also tolerate the (currently disabled) AI node taint
+            svccontroller.k3s.cattle.io/tolerations: |
+              [{"key": "homelab/ai", "operator": "Exists", "effect": "NoSchedule"}]
+        # DHCP stays on the router
+        serviceDhcp:
+          enabled: false
+        # TLS is terminated by Traefik
+        serviceWeb:
+          type: ClusterIP
+          https:
+            enabled: false
+        persistentVolumeClaim:
+          enabled: true
+          size: 1Gi
+        admin:
+          existingSecret: pihole-admin
+          passwordKey: password
+        # Same resolvers as common_dns_servers on the nodes
+        DNS1: 1.1.1.1
+        DNS2: 1.0.0.1
+        dnsmasq:
+          # Homelab names answered locally: they keep working without internet and are
+          # not dropped by the router's DNS rebinding protection.
+          customDnsEntries:
+            - address=/homelab.francesco-lombardo.it/192.168.1.16
+        extraEnvVars:
+          # Answer queries from every network (LAN, tailnet via the subnet router), not
+          # only the pod's own subnet
+          FTLCONF_dns_listeningMode: all
+          TZ: Europe/Rome
+        resources:
+          requests:
+            cpu: 50m
+            memory: 128Mi
+          limits:
+            memory: 512Mi
+        extraObjects:
+          # password from OpenBao secret/pihole
+          - apiVersion: external-secrets.io/v1
+            kind: ExternalSecret
+            metadata:
+              name: pihole-admin
+              namespace: pihole
+            spec:
+              refreshInterval: 1h
+              secretStoreRef:
+                kind: ClusterSecretStore
+                name: openbao
+              target:
+                name: pihole-admin
+              dataFrom:
+                - extract:
+                    key: pihole
+          # The UI lives under /admin: send the bare host there
+          - apiVersion: traefik.io/v1alpha1
+            kind: Middleware
+            metadata:
+              name: pihole-admin-redirect
+              namespace: pihole
+            spec:
+              redirectRegex:
+                regex: ^https://([^/]+)/?$
+                replacement: https://${1}/admin/
+          - apiVersion: traefik.io/v1alpha1
+            kind: IngressRoute
+            metadata:
+              name: pihole
+              namespace: pihole
+            spec:
+              entryPoints:
+                - websecure
+              routes:
+                - kind: Rule
+                  match: Host(`pihole.homelab.francesco-lombardo.it`)
+                  middlewares:
+                    - name: pihole-admin-redirect
+                  services:
+                    - name: pihole-web
+                      port: 80
+              # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
+              tls: {}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: pihole
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

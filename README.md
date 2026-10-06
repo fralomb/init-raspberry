@@ -142,6 +142,7 @@ first entries of `k3s_addons`, since every other component waits for a Secret fr
 | `secret/tailscale/operator-oauth` | `client_id`, `client_secret` | `tailscale/operator-oauth` |
 | `secret/argocd/repo-init-raspberry` | `githubAppID`, `githubAppInstallationID`, `githubAppPrivateKey` | `gitops/repo-init-raspberry` |
 | `secret/open-webui` | `secret-key`, `admin-email`, `admin-password` (optional) | `ai/open-webui-secret` |
+| `secret/pihole` | `password` | `pihole/pihole-admin` |
 
 #### Sealing
 OpenBao encrypts its storage with a root key that never touches the disk. At init the key is
@@ -336,6 +337,8 @@ whole home network.
     { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"] },
     // Homelab services through Traefik on the master
     { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:443", "tcp:80"] },
+    // Pi-hole DNS on the master
+    { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["udp:53", "tcp:53"] },
     // SSH to the k3s nodes (master + worker) and the Kubernetes API
     { "src": ["autogroup:member"], "dst": ["192.168.1.15/32", "192.168.1.16/32"], "ip": ["tcp:22"] },
     { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:6443"] }
@@ -344,7 +347,7 @@ whole home network.
   "tests": [
     {
       "src": "fra.lombardo92@gmail.com",
-      "accept": ["192.168.1.16:443", "192.168.1.15:22"],
+      "accept": ["192.168.1.16:443", "192.168.1.16:53", "192.168.1.15:22"],
       // Home router UI and Traefik's internal entrypoint (8080) must stay unreachable
       "deny": ["192.168.1.1:443", "192.168.1.16:8080"]
     }
@@ -361,6 +364,45 @@ whole home network.
   [apps/tailscale/subnet-router.yaml](apps/tailscale/subnet-router.yaml).
 - Add back an `ssh` section only if you use Tailscale SSH; plain SSH through the subnet route uses
   the `tcp:22` grant.
+
+## Pi-hole (DNS ad blocking)
+[apps/pihole/pihole.yaml](apps/pihole/pihole.yaml) is the Argo CD Application installing the
+[Pi-hole chart](https://github.com/MoJo2600/pihole-kubernetes) in the `pihole` namespace:
+
+- **DNS** on port 53 (TCP + UDP) of the master, `192.168.1.16`: a `LoadBalancer` Service served by
+  k3s's ServiceLB. The pod is pinned to the master and the Service uses
+  `externalTrafficPolicy: Local`, so the query log shows the real client IPs (the worker's svclb
+  pod listens too, but drops the traffic: no Pi-hole pod there).
+- **Upstreams** `1.1.1.1` and `1.0.0.1`. `*.homelab.francesco-lombardo.it` is answered locally with
+  `192.168.1.16`, so homelab names resolve without internet and skip the router's DNS rebinding
+  protection.
+- **Web UI** at `https://pihole.homelab.francesco-lombardo.it` (redirects to `/admin/`), through
+  Traefik and the wildcard certificate.
+- **State** (`/etc/pihole`: gravity database, lists, settings changed in the UI) on a 1 Gi
+  `local-path` PVC on the master. Changes made in the UI survive restarts; the values in the
+  Application (upstreams, listening mode, local records) are re-applied at every start.
+- DHCP stays on the router.
+
+The admin password comes from [OpenBao](#secrets-openbao--external-secrets), synced to the
+`pihole-admin` Secret by an `ExternalSecret` shipped with the Application. The pod waits for it:
+```
+bao kv put secret/pihole password=$(openssl rand -base64 24)
+```
+
+Check with:
+```
+kubectl -n pihole get pods,svc,externalsecret
+dig @192.168.1.16 doubleclick.net +short          # 0.0.0.0: blocked
+dig @192.168.1.16 argocd.homelab.francesco-lombardo.it +short   # 192.168.1.16
+```
+
+Then use it:
+- **LAN**: in the router's DHCP settings set `192.168.1.16` as the only DNS server. A second public
+  resolver would bypass the blocking for part of the queries. Pi-hole runs on the cluster: if the
+  master is down, so is name resolution on the LAN, so keep the router's own settings at hand.
+- **Tailnet**: admin console → DNS → Nameservers → *Add nameserver* → *Custom* → `192.168.1.16`,
+  and enable *Override DNS servers*. Tailnet devices reach it through the subnet router, allowed by
+  the `udp:53`/`tcp:53` grant in the [tailnet policy](#tailnet-policy).
 
 ## Local AI models
 > **Disabled**: the manifests in [apps/ai/](apps/ai), `k3s_node_taints` and the taint tasks in
