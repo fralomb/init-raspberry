@@ -35,11 +35,6 @@ spec:
         podDisruptionBudget:
           enabled: true
           minAvailable: 1
-        # A replica on the AI node too, should its taint be re-enabled
-        tolerations:
-          - key: homelab/ai
-            operator: Exists
-            effect: NoSchedule
         virtualHost: pihole.homelab.francesco-lombardo.it
         # externalTrafficPolicy Local: each node's IP answers through its own replica, keeping
         # the real client IPs in the query log (Cluster would SNAT them to a node IP). While a
@@ -48,10 +43,6 @@ spec:
           type: LoadBalancer
           mixedService: true
           externalTrafficPolicy: Local
-          annotations:
-            # The svclb DaemonSet must also tolerate the (currently disabled) AI node taint
-            svccontroller.k3s.cattle.io/tolerations: |
-              [{"key": "homelab/ai", "operator": "Exists", "effect": "NoSchedule"}]
         # DHCP stays on the router
         serviceDhcp:
           enabled: false
