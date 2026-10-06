@@ -379,7 +379,7 @@ whole home network.
   start. Blocklists (`adlists`), allow/deny lists (`whitelist`, `blacklist`, `regex`), upstreams and
   local records are all in the Application values: change them there, not in the UI. Changes
   made in the UI, query history and stats are per replica and lost on restart.
-- **Upstreams** `1.1.1.1` and `1.0.0.1`. `*.homelab.francesco-lombardo.it` is answered locally with
+- **Upstreams** Cloudflare (`1.1.1.1`, `1.0.0.1`) and Google (`8.8.8.8`, `8.8.4.4`). `*.homelab.francesco-lombardo.it` is answered locally with
   `192.168.1.16`, so homelab names resolve without internet and skip the router's DNS rebinding
   protection.
 - **Web UI** at `https://pihole.homelab.francesco-lombardo.it` (redirects to `/admin/`), through

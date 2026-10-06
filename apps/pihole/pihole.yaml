@@ -58,9 +58,12 @@ spec:
         admin:
           existingSecret: pihole-admin
           passwordKey: password
-        # Same resolvers as common_dns_servers on the nodes
-        DNS1: 1.1.1.1
-        DNS2: 1.0.0.1
+        # Upstreams: Cloudflare and Google. DNS1/DNS2 only take two, so they are blanked
+        # and the whole list goes to FTLCONF_dns_upstreams through `ftl` below.
+        DNS1: ""
+        DNS2: ""
+        ftl:
+          dns_upstreams: 1.1.1.1;1.0.0.1;8.8.8.8;8.8.4.4
         # Blocklists, imported into gravity at every start. Allow/deny entries go in
         # whitelist / blacklist / regex the same way.
         adlists:
