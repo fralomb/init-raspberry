@@ -38,7 +38,7 @@ The uninstall scripts remove k3s, its data and every PersistentVolume under
 
 ## 2. Install
 ```bash
-git checkout claude/dazzling-keller-oao382
+git checkout master
 ansible-playbook playbook.yaml -K
 export KUBECONFIG=~/.kube/config-raspberry
 kubectl get nodes -L homelab/ai          # both Ready, k3s-worker-1 has homelab/ai=true
@@ -95,12 +95,12 @@ Now `https://bao.homelab.francesco-lombardo.it` and `https://argocd.homelab.fran
 serve a valid certificate: `unset BAO_SKIP_VERIFY`, and from now on run `openbao.yaml` without
 `-e openbao_validate_certs=false`.
 
-## 6. Argo CD: sync from the branch
+## 6. Argo CD applications
+The root app tracks `master` (`targetRevision: HEAD` in
+[k3s/argocd/argocd-apps.yaml](../k3s/argocd/argocd-apps.yaml)):
 ```bash
-kubectl -n gitops patch application homelab-apps --type merge \
-  -p '{"spec":{"source":{"targetRevision":"claude/dazzling-keller-oao382"}}}'
 kubectl -n gitops get applications -w
-#   homelab-apps, tailscale-operator, pihole, ollama, open-webui → Synced / Healthy
+#   homelab-apps, tailscale-operator, pihole → Synced / Healthy
 ```
 While the Tailscale CRDs are installing, the root app briefly shows a failed sync for the
 `Connector`; its retry settles it. Argo CD UI admin password:
@@ -195,5 +195,3 @@ The snapshot is encrypted and only usable with the unseal keys.
   `-e openbao_token=$(bao print token)` after `bao login -method=userpass username=<you>`.
 - Move `~/.config/homelab/openbao-init.json` to your password manager and delete it. After
   that, `openbao.yaml` prompts for the unseal keys.
-- Merge the PR. Then either re-run the playbook, or reset the root app with
-  `kubectl -n gitops patch application homelab-apps --type merge -p '{"spec":{"source":{"targetRevision":"HEAD"}}}'`.
