@@ -142,6 +142,7 @@ first entries of `k3s_addons`, since every other component waits for a Secret fr
 | `secret/tailscale/operator-oauth` | `client_id`, `client_secret` | `tailscale/operator-oauth` |
 | `secret/argocd/repo-init-raspberry` | `githubAppID`, `githubAppInstallationID`, `githubAppPrivateKey` | `gitops/repo-init-raspberry` |
 | `secret/open-webui` | `secret-key`, `admin-email`, `admin-password` (optional) | `ai/open-webui-secret` |
+| `secret/pihole` | `password` | `pihole/pihole-admin` |
 
 #### Sealing
 OpenBao encrypts its storage with a root key that never touches the disk. At init the key is
@@ -336,6 +337,8 @@ whole home network.
     { "src": ["autogroup:member"], "dst": ["autogroup:self"], "ip": ["*"] },
     // Homelab services through Traefik on the master
     { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:443", "tcp:80"] },
+    // Pi-hole DNS, one replica per node
+    { "src": ["autogroup:member"], "dst": ["192.168.1.15/32", "192.168.1.16/32"], "ip": ["udp:53", "tcp:53"] },
     // SSH to the k3s nodes (master + worker) and the Kubernetes API
     { "src": ["autogroup:member"], "dst": ["192.168.1.15/32", "192.168.1.16/32"], "ip": ["tcp:22"] },
     { "src": ["autogroup:member"], "dst": ["192.168.1.16/32"], "ip": ["tcp:6443"] }
@@ -344,7 +347,7 @@ whole home network.
   "tests": [
     {
       "src": "fra.lombardo92@gmail.com",
-      "accept": ["192.168.1.16:443", "192.168.1.15:22"],
+      "accept": ["192.168.1.16:443", "192.168.1.16:53", "192.168.1.15:22"],
       // Home router UI and Traefik's internal entrypoint (8080) must stay unreachable
       "deny": ["192.168.1.1:443", "192.168.1.16:8080"]
     }
@@ -361,6 +364,49 @@ whole home network.
   [apps/tailscale/subnet-router.yaml](apps/tailscale/subnet-router.yaml).
 - Add back an `ssh` section only if you use Tailscale SSH; plain SSH through the subnet route uses
   the `tcp:22` grant.
+
+## Pi-hole (DNS ad blocking)
+[apps/pihole/pihole.yaml](apps/pihole/pihole.yaml) is the Argo CD Application installing the
+[Pi-hole chart](https://github.com/MoJo2600/pihole-kubernetes) in the `pihole` namespace:
+
+- **HA**: two replicas, one per node (required anti-affinity, a PDB with `minAvailable: 1`).
+  Rolling updates replace one pod at a time and wait for it to be Ready before the next.
+- **DNS** on port 53 (TCP + UDP) of both nodes, `192.168.1.16` and `192.168.1.15`: a `LoadBalancer`
+  Service served by k3s's ServiceLB. With `externalTrafficPolicy: Local` each node IP answers
+  through its own replica, so the query log shows the real client IPs. While a replica restarts its
+  node IP does not answer and clients retry on the other DNS server: hand out **both**.
+- **Stateless, config in Git**: `/etc/pihole` is an `emptyDir` and gravity is rebuilt at every
+  start. Blocklists (`adlists`), allow/deny lists (`whitelist`, `blacklist`, `regex`), upstreams and
+  local records are all in the Application values: change them there, not in the UI. Changes
+  made in the UI, query history and stats are per replica and lost on restart.
+- **Upstreams** Cloudflare (`1.1.1.1`, `1.0.0.1`) and Google (`8.8.8.8`, `8.8.4.4`). `*.homelab.francesco-lombardo.it` is answered locally with
+  `192.168.1.16`, so homelab names resolve without internet and skip the router's DNS rebinding
+  protection.
+- **Web UI** at `https://pihole.homelab.francesco-lombardo.it` (redirects to `/admin/`), through
+  Traefik and the wildcard certificate. A sticky cookie keeps the browser on one replica, since
+  login sessions are per replica; the dashboard shows that replica's stats only.
+- DHCP stays on the router.
+
+The admin password comes from [OpenBao](#secrets-openbao--external-secrets), synced to the
+`pihole-admin` Secret by an `ExternalSecret` shipped with the Application. The pods wait for it:
+```
+bao kv put secret/pihole password=$(openssl rand -base64 24)
+```
+
+Check with:
+```
+kubectl -n pihole get pods,svc,externalsecret
+dig @192.168.1.16 doubleclick.net +short          # 0.0.0.0: blocked
+dig @192.168.1.15 doubleclick.net +short          # same, from the other replica
+dig @192.168.1.16 argocd.homelab.francesco-lombardo.it +short   # 192.168.1.16
+```
+
+Then use it:
+- **LAN**: in the router's DHCP settings set `192.168.1.16` and `192.168.1.15` as the DNS servers,
+  and nothing else: a public resolver next to them would bypass the blocking for part of the queries.
+- **Tailnet**: admin console → DNS → Nameservers → *Add nameserver* → *Custom* → `192.168.1.16`,
+  again for `192.168.1.15`, and enable *Override DNS servers*. Tailnet devices reach them through
+  the subnet router, allowed by the `udp:53`/`tcp:53` grant in the [tailnet policy](#tailnet-policy).
 
 ## Local AI models
 > **Disabled**: the manifests in [apps/ai/](apps/ai), `k3s_node_taints` and the taint tasks in
