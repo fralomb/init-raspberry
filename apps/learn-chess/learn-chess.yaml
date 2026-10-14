@@ -27,7 +27,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: nginx
-          image: ghcr.io/fralomb/learn-chess:latest
+          image: ghcr.io/fralomb/learn-chess:v1.0.0
           imagePullPolicy: Always
           ports:
             - name: http
