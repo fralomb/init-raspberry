@@ -1,0 +1,96 @@
+---
+# learn-chess: static chess playground (nginx-unprivileged on 8080), at
+# https://learn-chess.homelab.francesco-lombardo.it through Traefik.
+# - Image: private ghcr.io/fralomb/learn-chess, pulled with the `ghcr` Secret (ghcr-secret.yaml).
+# - CI pushes `latest` on every master push and there is no image updater: a new build is
+#   picked up only by a rollout restart of the Deployment, or by pinning a `sha-…` / `v…` tag below.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: learn-chess
+  namespace: learn-chess
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: learn-chess
+  template:
+    metadata:
+      labels:
+        app: learn-chess
+    spec:
+      imagePullSecrets:
+        - name: ghcr
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nginx
+          image: ghcr.io/fralomb/learn-chess:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              memory: 64Mi
+          # nginx's only writable paths (pid file and temp dirs)
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /var/cache/nginx
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: learn-chess
+  namespace: learn-chess
+spec:
+  selector:
+    app: learn-chess
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: traefik.io/v1alpha1
+kind: IngressRoute
+metadata:
+  name: learn-chess
+  namespace: learn-chess
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - kind: Rule
+      match: Host(`learn-chess.homelab.francesco-lombardo.it`)
+      services:
+        - name: learn-chess
+          port: 80
+  # Served by the default TLSStore certificate (see k3s/traefik/traefik-config.yaml)
+  tls: {}

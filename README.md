@@ -143,6 +143,7 @@ first entries of `k3s_addons`, since every other component waits for a Secret fr
 | `secret/argocd/repo-init-raspberry` | `githubAppID`, `githubAppInstallationID`, `githubAppPrivateKey` | `gitops/repo-init-raspberry` |
 | `secret/open-webui` | `secret-key`, `admin-email`, `admin-password` (optional) | `ai/open-webui-secret` |
 | `secret/pihole` | `password` | `pihole/pihole-admin` |
+| `secret/gh` | `read-packages-token` | `learn-chess/ghcr` (`dockerconfigjson` for `ghcr.io`) |
 
 #### Sealing
 OpenBao encrypts its storage with a root key that never touches the disk. At init the key is
@@ -407,6 +408,27 @@ Then use it:
 - **Tailnet**: admin console → DNS → Nameservers → *Add nameserver* → *Custom* → `192.168.1.16`,
   again for `192.168.1.15`, and enable *Override DNS servers*. Tailnet devices reach them through
   the subnet router, allowed by the `udp:53`/`tcp:53` grant in the [tailnet policy](#tailnet-policy).
+
+## learn-chess
+[apps/learn-chess/](apps/learn-chess) deploys the learn-chess static site (nginx-unprivileged on
+port 8080) in the `learn-chess` namespace, at `https://learn-chess.homelab.francesco-lombardo.it`
+through Traefik and the wildcard certificate. Plain manifests, no Application: the root app syncs
+them directly.
+
+The image `ghcr.io/fralomb/learn-chess` is private: [apps/learn-chess/ghcr-secret.yaml](apps/learn-chess/ghcr-secret.yaml)
+builds the `ghcr` pull secret from a GitHub token with `read:packages` stored in
+[OpenBao](#secrets-openbao--external-secrets):
+```
+bao kv put secret/gh read-packages-token=XXX
+```
+
+The Deployment runs `latest` with `imagePullPolicy: Always`, and nothing watches the registry: after
+CI pushes a new image, restart the pods to pull it, or pin a `sha-<shortsha>` / `v…` tag in
+[apps/learn-chess/learn-chess.yaml](apps/learn-chess/learn-chess.yaml).
+```
+kubectl -n learn-chess rollout restart deploy/learn-chess
+kubectl -n learn-chess get pods,externalsecret,ingressroute
+```
 
 ## Local AI models
 > **Disabled**: the manifests in [apps/ai/](apps/ai), `k3s_node_taints` and the taint tasks in
