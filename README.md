@@ -410,21 +410,26 @@ Then use it:
   the subnet router, allowed by the `udp:53`/`tcp:53` grant in the [tailnet policy](#tailnet-policy).
 
 ## learn-chess
-[apps/learn-chess/](apps/learn-chess) deploys the learn-chess static site (nginx-unprivileged on
-port 8080) in the `learn-chess` namespace, at `https://learn-chess.homelab.francesco-lombardo.it`
-through Traefik and the wildcard certificate. Plain manifests, no Application: the root app syncs
-them directly.
+[apps/learn-chess/learn-chess.yaml](apps/learn-chess/learn-chess.yaml) only defines the `learn-chess`
+Argo CD Application: the manifests live in the app's own repo, under
+[fralomb/learn-chess `infra/k8s/`](https://github.com/fralomb/learn-chess/tree/master/infra/k8s)
+(branch `master`). They deploy the static site (nginx-unprivileged on port 8080) in the
+`learn-chess` namespace, at `https://learn-chess.homelab.francesco-lombardo.it` through Traefik and
+the wildcard certificate.
 
-The image `ghcr.io/fralomb/learn-chess` is private: [apps/learn-chess/ghcr-secret.yaml](apps/learn-chess/ghcr-secret.yaml)
+The repo is private: the `repo-learn-chess` repository Secret in the same file reuses the
+init-raspberry GitHub App credentials (`secret/argocd/repo-init-raspberry`); the App is installed on
+every repo of the account.
+
+The image `ghcr.io/fralomb/learn-chess` is private too: `infra/k8s/ghcr-secret.yaml` in the app repo
 builds the `ghcr` pull secret from a GitHub token with `read:packages` stored in
 [OpenBao](#secrets-openbao--external-secrets):
 ```
 bao kv put secret/gh read-packages-token=XXX
 ```
 
-The Deployment runs `latest` with `imagePullPolicy: Always`, and nothing watches the registry: after
-CI pushes a new image, restart the pods to pull it, or pin a `sha-<shortsha>` / `v…` tag in
-[apps/learn-chess/learn-chess.yaml](apps/learn-chess/learn-chess.yaml).
+Nothing watches the registry: after CI pushes a new image, restart the pods to pull it, or change
+the image tag in the app repo's `infra/k8s/learn-chess.yaml`.
 ```
 kubectl -n learn-chess rollout restart deploy/learn-chess
 kubectl -n learn-chess get pods,externalsecret,ingressroute
